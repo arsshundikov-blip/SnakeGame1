@@ -18,10 +18,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install system dependencies
+      - name: Install system dependencies (FIXED for Ubuntu 24.04)
         run: |
           sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
+          python3-virtualenv autoconf libtool pkg-config zlib1g-dev \
+          libncurses5-dev libncursesw5-dev libtinfo6 cmake libffi-dev \
+          libssl-dev automake autopoint gettext
 
       - name: Install Buildozer and Cython
         run: |
@@ -30,7 +33,6 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
-          # Разрешаем лицензию Android SDK автоматически
           export APP_ANDROID_ACCEPT_SDK_LICENSE=1
           buildozer -v android debug
 
