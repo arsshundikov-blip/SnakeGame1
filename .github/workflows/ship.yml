@@ -4,56 +4,31 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      targets:
-        description: "Comma-separated targets: apk,pip,pages"
-        required: false
-        default: "apk"
 
 jobs:
   detect:
     runs-on: ubuntu-24.04
     outputs:
       has_python: ${{ steps.check.outputs.has_python }}
-      has_web: ${{ steps.check.outputs.has_web }}
-      entry: ${{ steps.check.outputs.entry }}
     steps:
       - uses: actions/checkout@v4
       - name: Detect project
         id: check
         run: |
-          if ls *.py 1> /dev/null 2>&1 || [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f buildozer.spec ]; then
+          if ls *.py 1> /dev/null 2>&1 || [ -f requirements.txt ] || [ -f buildozer.spec ]; then
             echo "has_python=true" >> $GITHUB_OUTPUT
           else
             echo "has_python=false" >> $GITHUB_OUTPUT
           fi
-          if [ -f index.html ] || [ -d static ] || [ -d public ]; then
-            echo "has_web=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_web=false" >> $GITHUB_OUTPUT
-          fi
-          ENTRY="main.py"
-          echo "entry=$ENTRY" >> $GITHUB_OUTPUT
-          echo "Detected entry: $ENTRY"
 
   build-apk:
     needs: detect
-    if: needs.detect.outputs.has_python == 'true' && contains(github.event.inputs.targets || 'apk', 'apk')
-    runs-on: ubuntu-24.04  # <--- ВОТ ГЛАВНОЕ ИСПРАВЛЕНИЕ (вместо ubuntu-latest)
+    if: needs.detect.outputs.has_python == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Ensure buildozer.spec exists
-        run: |
-          if [ ! -f buildozer.spec ]; then
-            echo "ERROR: buildozer.spec missing. Re-run shipit locally so it generates one."
-            exit 1
-          fi
-          echo "=== buildozer.spec (head) ==="
-          head -40 buildozer.spec
-          ls -la *.py 2>/dev/null | head -20 || true
 
       - name: Build APK with Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
@@ -61,14 +36,8 @@ jobs:
         with:
           command: buildozer -v android debug
           workdir: .
-          buildozer_version: stable
-
-      - name: Show APK outputs
-        if: always()
-        run: |
-          echo "=== bin/ ==="
-          ls -la bin/ 2>/dev/null || echo "(no bin yet)"
-          find . -name "*.apk" 2>/dev/null || true
+          # ВОТ ГЛАВНОЕ ИСПРАВЛЕНИЕ: используем старую версию Buildozer
+          buildozer_version: 1.5.0
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
