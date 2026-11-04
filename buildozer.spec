@@ -1,6 +1,3 @@
-# Shipit OS generated buildozer.spec
-# Edit title / package.name / requirements as needed, then re-run shipit.
-
 [app]
 
 # (str) Title of your application
@@ -28,10 +25,11 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 version = 0.1.0
 
 # (list) Application requirements (comma separated)
-requirements = python3,kivy
+# ВОТ ГЛАВНОЕ: фиксируем Python 3.9 и Kivy 2.3.0
+requirements = python3==3.9.18, kivy==2.3.0
 
 # (str) Supported orientation
-orientation = portrait
+orientation = landscape
 
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
@@ -46,9 +44,6 @@ android.ndk = 25b
 android.accept_sdk_license = True
 android.archs = arm64-v8a, armeabi-v7a
 android.logcat_filters = *:S python:D
-
-# Detected entry: snake2.py
-# Buildozer looks for main.py by default. Rename your entry to main.py or adjust source.dir / your app layout.
 
 #------------------------------------------------------------------------------
 # Buildozer settings
