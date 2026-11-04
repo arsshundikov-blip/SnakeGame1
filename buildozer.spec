@@ -25,8 +25,8 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 version = 0.1.0
 
 # (list) Application requirements (comma separated)
-# ВОТ ГЛАВНОЕ: фиксируем Python 3.9 и Kivy 2.3.0
-requirements = python3==3.9.18, kivy==2.3.0
+# ВОТ ГЛАВНОЕ: теперь hostpython3 и python3 одной версии (3.9.18)
+requirements = python3==3.9.18, hostpython3==3.9.18, kivy==2.3.0
 
 # (str) Supported orientation
 orientation = landscape
