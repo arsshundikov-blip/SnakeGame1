@@ -13,10 +13,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      # ИСПОЛЬЗУЕМ PYTHON 3.9, А НЕ 3.11 (он стабильнее для pyjnius)
+      - name: Set up Python 3.9
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.9'
 
       - name: Install system dependencies
         run: |
@@ -29,8 +30,8 @@ jobs:
       - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
-          # ФИКСАЦИЯ ВЕРСИЙ: ставим Buildozer 1.5.0 и Cython 0.29.36, чтобы не было багов
-          pip install buildozer==1.5.0 cython==0.29.36 virtualenv
+          # ФИКСАЦИЯ ВЕРСИЙ: Cython < 3.0 обязателен для Kivy
+          pip install buildozer cython==0.29.36 virtualenv
 
       - name: Build APK with Buildozer
         run: |
