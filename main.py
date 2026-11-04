@@ -3,16 +3,16 @@ kivy.require('2.0.0')
 
 from kivy.app import App
 from kivy.uix.widget import Widget
-from kivy.uix.button import Button
-from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Rectangle, Line
 from kivy.core.window import Window
+from kivy.core.text import Label as CoreLabel
 import math
 import random
 
 # ---------- Константы ----------
-WIDTH, HEIGHT = 800, 600
 CELL = 24
 SNAKE_SPEED_BASE = 6.0
 SNAKE_SPEED_PER_BOOST = 0.25
@@ -20,12 +20,9 @@ MAX_BOOSTERS = 10
 MAX_HEALS = 10
 HEAD_MAX_HP = 100
 
-# Цвета (нормализованные для Kivy)
 C_BG = (0.05, 0.06, 0.09)
-C_GRID = (0.09, 0.11, 0.15)
 C_HEAD = (0.55, 1.0, 0.7)
 C_BODY = (0.23, 0.67, 0.39)
-C_BODY_DARK = (0.15, 0.47, 0.27)
 C_ENEMY = (0.9, 0.31, 0.31)
 C_ENEMY_FAST = (1.0, 0.55, 0.23)
 C_ENEMY_TANK = (0.63, 0.23, 0.78)
@@ -33,7 +30,9 @@ C_ENEMY_SHOOTER = (1.0, 0.31, 0.78)
 C_BULLET = (1.0, 0.94, 0.47)
 C_ENEMY_BULLET = (1.0, 0.39, 0.39)
 C_STATION = (1.0, 0.78, 0.23)
-C_GOLD = (1.0, 0.82, 0.31)
+C_WHITE = (1, 1, 1)
+C_RED = (0.6, 0, 0)
+C_GREEN = (0, 0.86, 0.24)
 
 MOD_PISTOL, MOD_RIFLE, MOD_SNIPER = "Pistol", "Rifle", "Sniper"
 MOD_SHIELD, MOD_HEAL, MOD_BOOSTER, MOD_AXES = "Shield", "Heal", "Booster", "Axes"
@@ -127,23 +126,29 @@ class Snake:
             if m.mtype == MOD_BOOSTER: self.boosters = max(0, self.boosters-1)
             if m.mtype == MOD_HEAL: self.heals = max(0, self.heals-1)
 
-# ---------- Главный виджет игры ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.bind(size=self._update_canvas)
         self.snake = None
         self.enemies, self.bullets, self.pickups, self.stations = [], [], [], []
         self.wave, self.wave_timer = 0, 2.0
         self.pickup_timer, self.station_timer = 6.0, 25.0
         self.paused, self.game_over = False, False
         self.show_upgrade, self.upgrade_options = False, []
+        
         self.message, self.message_timer = "", 0.0
         self.station_menu = False
         self.reorder_mode, self.reorder_sel = False, 0
-        self.cam_x, self.cam_y = 0.0, 0.0
+        
+        self.joy_center = (100, 100)
+        self.joy_radius = 60
+        
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
+
+    def on_size(self, instance, value):
+        self.joy_center = (self.width - 120, 120)
+        self.joy_radius = min(self.width, self.height) * 0.12
 
     def reset(self):
         self.snake = Snake()
@@ -151,32 +156,29 @@ class GameWidget(Widget):
         self.wave, self.wave_timer, self.pickup_timer, self.station_timer = 0, 2.0, 6.0, 25.0
         self.paused, self.game_over, self.show_upgrade = False, False, False
         self.station_menu, self.reorder_mode = False, False
-        self.cam_x = self.cam_y = 0.0
 
     def msg(self, t, dur=2.0): self.message, self.message_timer = t, dur
 
     def update(self, dt):
-        if self.game_over or self.paused or self.show_upgrade or self.station_menu or self.reorder_mode:
+        if self.show_upgrade or self.station_menu or self.reorder_mode or self.game_over or self.paused:
             self.redraw()
             return
         s = self.snake
-        # Движение змеи
         s.head[0] += s.dir[0] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
         s.head[1] += s.dir[1] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
-        # Тело
+        
         target = s.head
         for i in range(len(s.body)):
             to = [target[0]-s.body[i][0], target[1]-s.body[i][1]]
             d = math.hypot(*to)
             if d > CELL: s.body[i] = [target[0]-to[0]/d*CELL, target[1]-to[1]/d*CELL]
             target = s.body[i]
-        # Кулдауны
+            
         for m in s.modules:
             m.cooldown = max(0, m.cooldown - dt)
             m.phase += dt
             
         mpos = s.module_positions()
-        # Стрельба
         for i, m in enumerate(s.modules):
             if not m.is_gun() or m.cooldown > 0: continue
             pos = mpos[i]; best, target_e = None, None
@@ -191,7 +193,6 @@ class GameWidget(Widget):
                 self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*900, math.sin(ang)*900, dmg))
                 m.cooldown = cd
                 
-        # Хилки
         for idx, m in enumerate(s.modules):
             if m.mtype != MOD_HEAL or m.cooldown > 0: continue
             m.cooldown = 1.5; heal = 0.5 + 0.3*m.level
@@ -203,7 +204,6 @@ class GameWidget(Widget):
                 if (mp[0]-p[0])**2 + (mp[1]-p[1])**2 <= (70+5*m.level)**2:
                     other.hp = min(other.max_hp, other.hp+heal*0.4)
                     
-        # Топоры
         for i, m in enumerate(s.modules):
             if m.mtype != MOD_AXES: continue
             mp = mpos[i]; orbit = 55 + 5*m.level
@@ -217,7 +217,6 @@ class GameWidget(Widget):
                         e.x += dx/dl*18; e.y += dy/dl*18
                         m.cooldown = 0.25
                         
-        # Урон модулям
         for i, m in enumerate(s.modules):
             p = mpos[i]
             for e in self.enemies:
@@ -228,7 +227,6 @@ class GameWidget(Widget):
                 if s.had_modules and not s.modules: self.game_over = True; return
                 break
                 
-        # Враги
         for e in list(self.enemies):
             ang = math.atan2(s.head[1]-e.y, s.head[0]-e.x); d = math.hypot(s.head[0]-e.x, s.head[1]-e.y)
             if e.kind == "shooter" and d < 280: ang += math.pi
@@ -245,7 +243,6 @@ class GameWidget(Widget):
                 
         if s.head_hp <= 0: self.game_over = True; return
         
-        # Пули
         for b in list(self.bullets):
             b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt
             if b.life <= 0: self.bullets.remove(b); continue
@@ -260,7 +257,6 @@ class GameWidget(Widget):
                     if (b.x-e.x)**2 + (b.y-e.y)**2 <= (e.radius+b.radius)**2:
                         e.hp -= b.damage; self.bullets.remove(b); break
                         
-        # Смерть врагов
         for e in list(self.enemies):
             if e.hp <= 0:
                 self.enemies.remove(e)
@@ -270,22 +266,20 @@ class GameWidget(Widget):
                     self.open_upgrade()
                     if self.show_upgrade: return
                     
-        # Подбор модулей
         for p in list(self.pickups):
             touch = (p.x-s.head[0])**2 + (p.y-s.head[1])**2 <= (p.radius+CELL)**2
             if not touch:
                 for b in s.body:
                     if (p.x-b[0])**2 + (p.y-b[1])**2 <= (p.radius+CELL*0.7)**2: touch=True; break
             if touch:
-                if s.add_module(p.mtype): self.pickups.remove(p); self.msg(f"+{MOD_NAMES[p.mtype]}")
+                if s.add_module(p.mtype): 
+                    self.pickups.remove(p); self.msg(f"Получен: {MOD_NAMES[p.mtype]}")
                 else: self.msg("Лимит достигнут", 1.0)
                 
-        # Станции
         for st in self.stations:
             if not st.used and (st.x-s.head[0])**2 + (st.y-s.head[1])**2 <= (st.radius+CELL)**2:
                 self.open_station(st); return
                 
-        # Таймеры
         self.wave_timer -= dt
         if self.wave_timer <= 0: self.spawn_wave(); self.wave_timer = max(6.0, 12.0-self.wave*0.3)
         self.pickup_timer -= dt
@@ -294,9 +288,6 @@ class GameWidget(Widget):
         if self.station_timer <= 0: self.spawn_station(); self.station_timer = random.uniform(30,50)
         if self.message_timer > 0: self.message_timer -= dt
         
-        # Камера
-        tx, ty = s.head[0]-self.width/2, s.head[1]-self.height/2
-        self.cam_x += (tx-self.cam_x)*0.15; self.cam_y += (ty-self.cam_y)*0.15
         self.redraw()
 
     def _random_ring_pos(self, rmin, rmax):
@@ -332,7 +323,8 @@ class GameWidget(Widget):
         x, y = self._random_ring_pos(200, 500); self.stations.append(Station(x, y))
 
     def open_upgrade(self):
-        self.show_upgrade = True; opts, existing = [], {m.mtype for m in self.snake.modules}
+        self.show_upgrade = True
+        opts, existing = [], {m.mtype for m in self.snake.modules}
         for t in existing: opts.append((f"Усилить: {MOD_NAMES[t]}", ('upgrade', t)))
         for t in [MOD_PISTOL, MOD_RIFLE, MOD_SNIPER, MOD_SHIELD, MOD_HEAL, MOD_BOOSTER]:
             if t not in existing:
@@ -355,46 +347,85 @@ class GameWidget(Widget):
 
     def station_repair(self):
         s = self.snake
-        if not s.lost_modules: self.msg("Нет потерянных"); return
+        if not s.lost_modules: self.msg("Нет потерянных"); self.station_menu = False; return
         cost = len(s.lost_modules)*8
-        if s.money < cost: self.msg(f"Нужно {cost}"); return
-        s.money -= cost; restored, s.lost_modules = s.lost_modules[:], []; cnt = 0
+        if s.money < cost: self.msg(f"Нужно {cost}"); self.station_menu = False; return
+        s.money -= cost
+        restored, s.lost_modules = s.lost_modules[:], []; cnt = 0
         for t in restored:
             if t == MOD_HEAL and s.heals >= MAX_HEALS: continue
             if t == MOD_BOOSTER and s.boosters >= MAX_BOOSTERS: continue
             if s.add_module(t): cnt += 1
         self.msg(f"Восстановлено: {cnt}")
+        self.station_menu = False
 
     def station_heal(self):
         heal = self.snake.head_max_hp * 0.25
         self.snake.head_hp = min(self.snake.head_max_hp, self.snake.head_hp + heal)
         self.msg("Хил 25%")
-
-    def station_reorder_start(self):
-        if len(self.snake.modules) < 2: self.msg("Мало модулей"); return
-        self.station_menu, self.reorder_mode, self.reorder_sel = False, True, 0
-
-    def reorder_confirm(self):
-        mods = self.snake.modules; i = self.reorder_sel
-        if i < len(mods)-1:
-            mods[i], mods[i+1] = mods[i+1], mods[i]; self.reorder_sel = i+1; self.msg("Сдвинуто")
+        self.station_menu = False
 
     def on_touch_down(self, touch):
         if self.width == 0 or self.height == 0: return
-        # Координаты джойстика (в правом нижнем углу)
-        joy_x, joy_y = self.width - 120, 120
-        if (touch.x - joy_x)**2 + (touch.y - joy_y)**2 <= 100**2:
+        
+        if self.show_upgrade:
+            for i in range(3):
+                if i < len(self.upgrade_options):
+                    bx = self.width/2 - 200
+                    by = self.height/2 + 50 - i*60
+                    if bx <= touch.x <= bx + 400 and by <= touch.y <= by + 50:
+                        self.apply_upgrade(i)
+                        return True
+            return True
+
+        if self.station_menu:
+            for i in range(4):
+                bx = self.width/2 - 250
+                by = self.height/2 + 80 - i*60
+                if bx <= touch.x <= bx + 500 and by <= touch.y <= by + 50:
+                    if i == 0: self.station_repair()
+                    elif i == 1: 
+                        self.station_menu = False; self.reorder_mode = True; self.reorder_sel = 0
+                    elif i == 2: self.station_heal()
+                    elif i == 3: self.station_menu = False
+                    return True
+            return True
+
+        if self.reorder_mode:
+            for i in range(len(self.snake.modules)):
+                bx = self.width/2 - 250
+                by = self.height - 150 - i*40
+                if bx <= touch.x <= bx + 500 and by <= touch.y <= by + 30:
+                    if i < len(self.snake.modules) - 1:
+                        mods = self.snake.modules
+                        mods[i], mods[i+1] = mods[i+1], mods[i]
+                    return True
+            if touch.x < 120 and touch.y > self.height - 120:
+                self.reorder_mode = False
+            return True
+
+        if touch.x < 120 and touch.y > self.height - 120:
+            if self.game_over: self.reset(); return True
+            self.paused = not self.paused; return True
+            
+        joy_x, joy_y = self.joy_center
+        if (touch.x - joy_x)**2 + (touch.y - joy_y)**2 <= self.joy_radius**2:
             touch.ud['joystick'] = True
             self._handle_joystick(touch.x, touch.y, joy_x, joy_y)
+            return True
+            
+        return super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
         if touch.ud.get('joystick'):
-            joy_x, joy_y = self.width - 120, 120
+            joy_x, joy_y = self.joy_center
             self._handle_joystick(touch.x, touch.y, joy_x, joy_y)
+            return True
+        return super().on_touch_move(touch)
 
     def _handle_joystick(self, x, y, cx, cy):
         dx, dy = x - cx, y - cy
-        if math.hypot(dx, dy) > 15: # Мертвая зона
+        if math.hypot(dx, dy) > 15:
             l = math.hypot(dx, dy)
             self.snake.dir = [dx/l, dy/l]
             self.redraw()
@@ -402,111 +433,138 @@ class GameWidget(Widget):
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
-            # Фон
             Color(*C_BG); Rectangle(pos=(0, 0), size=(self.width, self.height))
             
-            # Отрисовка объектов (камера)
-            ox, oy = self.cam_x, self.cam_y
-            def screen(x, y): return x - ox + self.width/2, y - oy + self.height/2
+            ox = self.snake.head[0] - Window.width / 2
+            oy = self.snake.head[1] - Window.height / 2
+            def screen(x, y): return x - ox, y - oy
 
-            # Станции
             for st in self.stations:
                 if not st.used:
                     sx, sy = screen(st.x, st.y)
                     Color(*C_STATION); Ellipse(pos=(sx-st.radius, sy-st.radius), size=(st.radius*2, st.radius*2))
 
-            # Подборы
             for p in self.pickups:
                 sx, sy = screen(p.x, p.y)
                 Color(*MOD_COLORS[p.mtype]); Ellipse(pos=(sx-p.radius, sy-p.radius), size=(p.radius*2, p.radius*2))
 
-            # Враги
             for e in self.enemies:
                 sx, sy = screen(e.x, e.y)
                 Color(*e.color); Ellipse(pos=(sx-e.radius, sy-e.radius), size=(e.radius*2, e.radius*2))
-                # HP бар
-                Color(0.4, 0, 0); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28, 4))
-                Color(0, 0.86, 0.24); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28*max(0,min(1,e.hp/e.max_hp)), 4))
+                Color(*C_RED); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28, 4))
+                Color(*C_GREEN); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28*max(0,min(1,e.hp/e.max_hp)), 4))
 
-            # Пули
             for b in self.bullets:
                 sx, sy = screen(b.x, b.y)
                 Color(*(C_ENEMY_BULLET if b.enemy else C_BULLET))
                 Ellipse(pos=(sx-b.radius, sy-b.radius), size=(b.radius*2, b.radius*2))
 
-            # Змея (тело и модули)
             s = self.snake
             for b in s.body:
                 sx, sy = screen(b[0], b[1])
                 Color(*C_BODY); Rectangle(pos=(sx-CELL*0.45, sy-CELL*0.45), size=(CELL*0.9, CELL*0.9))
             
-            # Модули
             mpos = s.module_positions()
             for i, m in enumerate(s.modules):
                 if i >= len(mpos): continue
                 mx, my = screen(mpos[i][0], mpos[i][1])
                 Color(*MOD_COLORS[m.mtype]); Rectangle(pos=(mx-CELL*0.3, my-CELL*0.3), size=(CELL*0.6, CELL*0.6))
+                Color(*C_RED); Rectangle(pos=(mx-12, my-CELL*0.8), size=(24, 4))
+                Color(*C_GREEN); Rectangle(pos=(mx-12, my-CELL*0.8), size=(24*max(0,min(1,m.hp/m.max_hp)), 4))
             
-            # Голова
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            # HUD (текст рисуется через Label поверх, здесь только элементы)
-            # В данном виджете текст не рисуем, чтобы не грузить Canvas
-
-            # Джойстик (рисуем всегда)
-            jx, jy = self.width - 120, 120
-            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-60, jy-60), size=(120, 120))
-            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, 60), width=2)
+            jx, jy = self.joy_center
+            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-self.joy_radius, jy-self.joy_radius), size=(self.joy_radius*2, self.joy_radius*2))
+            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, self.joy_radius), width=2)
+            hx, hy = s.dir[0], s.dir[1]
+            knob_x = jx + hx * (self.joy_radius * 0.5)
+            knob_y = jy + hy * (self.joy_radius * 0.5)
+            Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 15, knob_y - 15), size=(30, 30))
             
-            # Кнопка OK
-            Color(0.2, 0.3, 0.2); Rectangle(pos=(20, 60), size=(80, 80))
-            Color(1, 1, 1); Line(rectangle=(20, 60, 80, 80), width=2)
+            Color(0.2, 0.3, 0.2); Rectangle(pos=(20, self.height-100), size=(80, 80))
+            Color(1, 1, 1); Line(rectangle=(20, self.height-100, 80, 80), width=2)
 
+            # Меню улучшений
+            if self.show_upgrade:
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
+                lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
+                lbl_title.refresh()
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.width/2, self.height/2 + 120), size=lbl_title.texture.size)
+                for i, (label, _) in enumerate(self.upgrade_options):
+                    bx = self.width/2 - 200
+                    by = self.height/2 + 50 - i*60
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 400, 50), width=2)
+                    lbl = CoreLabel(text=f"{i+1}. {label}", font_size=20, color=(1, 1, 1, 1))
+                    lbl.refresh()
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
+
+            # Меню станции
+            if self.station_menu:
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
+                lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
+                lbl_title.refresh()
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.width/2, self.height/2 + 150), size=lbl_title.texture.size)
+                
+                opts = [f"1. Восстановить ({len(s.lost_modules)*8}$)", "2. Переставить модули", "3. Лечение (25%)", "4. Выйти"]
+                for i, text in enumerate(opts):
+                    bx = self.width/2 - 250
+                    by = self.height/2 + 80 - i*60
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 50), width=2)
+                    lbl = CoreLabel(text=text, font_size=20, color=(1, 1, 1, 1))
+                    lbl.refresh()
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
+
+            # Режим перестановки
+            if self.reorder_mode:
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
+                lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=24, bold=True, color=(1, 0.8, 0.3, 1))
+                lbl_title.refresh()
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.size[0]/2, self.height - 100), size=lbl_title.texture.size)
+                
+                for i, m in enumerate(s.modules):
+                    bx = self.width/2 - 250
+                    by = self.height - 150 - i*40
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 30), width=1)
+                    lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}", font_size=18, color=(1, 1, 1, 1))
+                    lbl.refresh()
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 5), size=lbl.texture.size)
 
 class SnakeApp(App):
     def build(self):
-        # Главный слой
-        self.root = BoxLayout(orientation='vertical')
-        
-        # Игровое поле
+        root = FloatLayout()
         self.game = GameWidget()
-        self.root.add_widget(self.game)
+        root.add_widget(self.game)
         
-        # Обработка кнопки OK (взаимодействие с меню)
-        # Так как мы не можем сделать нормальную кнопку поверх Canvas в Kivy без сложных ухищрений,
-        # мы ловим нажатия на левый нижний угол прямо в методе on_touch_down (добавим ниже).
+        self.hud = Label(text="HP: 100 | Lvl: 1 | Wave: 0 | $: 0", 
+                         pos_hint={'x': 0.01, 'top': 0.99}, size_hint=(0.5, 0.1),
+                         color=(1, 1, 1, 1), font_size='20sp', bold=True, halign='left')
+        self.hud.bind(size=self.hud.setter('text_size'))
+        root.add_widget(self.hud)
         
-        return self.root
+        self.notify_label = Label(text="", 
+                         pos_hint={'x': 0.01, 'top': 0.85}, size_hint=(0.5, 0.1),
+                         color=(1, 0.8, 0.3, 1), font_size='18sp', bold=True, halign='left')
+        self.notify_label.bind(size=self.notify_label.setter('text_size'))
+        root.add_widget(self.notify_label)
+        
+        return root
 
     def on_start(self):
-        # Таймер для обновления HUD (текст)
         Clock.schedule_interval(self.update_hud, 0.1)
 
     def update_hud(self, dt):
-        # Вывод текста через заголовок окна (на телефоне будет не видно, но на ПК работает)
         g = self.game; s = g.snake
-        text = f"HP:{int(s.head_hp)} Lvl:{s.level} Wave:{g.wave} $:{s.money}"
-        if g.show_upgrade: text += " | УРОВЕНЬ! (Жми OK)"
-        if g.game_over: text += " | ИГРА ОКОНЧЕНА (Жми OK)"
-        if g.message_timer > 0: text += f" | {g.message}"
-        Window.set_title(text)
-
-    def on_touch_down(self, touch):
-        # Обработка нажатий на кнопки меню (вне джойстика)
-        g = self.game
-        if not g: return
-        jx, jy = g.width - 120, 120
+        text = f"HP: {int(s.head_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
+        if g.game_over: text += "\nИГРА ОКОНЧЕНА (Жми OK)"
+        self.hud.text = text
         
-        # Если нажали не на джойстик, а на кнопку OK (левый нижний угол)
-        if touch.x < 120 and touch.y < 160:
-            if g.game_over: g.reset(); return
-            if g.show_upgrade: g.apply_upgrade(0); return
-            if g.station_menu: g.station_heal(); g.station_menu = False; return
-            g.paused = not g.paused
-            return
-        return super().on_touch_down(touch)
+        if g.message_timer > 0:
+            self.notify_label.text = g.message
+        else:
+            self.notify_label.text = ""
 
 if __name__ == '__main__':
-    Window.size = (800, 600) # Размер окна для ПК
+    Window.size = (800, 600)
     SnakeApp().run()
