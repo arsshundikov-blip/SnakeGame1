@@ -25,8 +25,8 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 version = 0.1.0
 
 # (list) Application requirements (comma separated)
-# Используем Python 3.13.9 и Kivy 2.3.1 (последняя поддерживаемая версия)
-requirements = python3==3.13.9, hostpython3==3.13.9, kivy==2.3.1
+# ФИКС: 3.13.9 (последняя для Kivy 2.3.1) + библиотеки, чтобы обойти баг с Python 3.14
+requirements = python3==3.13.9,hostpython3==3.13.9,kivy==2.3.1,openssl,sqlite3,pyjnius,android,setuptools,certifi,charset-normalizer,idna,urllib3,requests
 
 # (str) Supported orientation
 orientation = landscape
