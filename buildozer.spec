@@ -11,8 +11,8 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 
 version = 0.1.0
 
-# ПРАВИЛЬНЫЕ ВЕРСИИ
-requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1
+# УБРАЛИ СЛОВО "android" ОТСЮДА
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,openssl,sqlite3,pyjnius,setuptools,certifi,charset-normalizer,idna,urllib3,requests
 
 orientation = landscape
 fullscreen = 0
