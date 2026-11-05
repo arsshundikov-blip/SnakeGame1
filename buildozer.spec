@@ -1,44 +1,29 @@
-name: Build Kivy APK
+[app]
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
+title = Snakegame1
+package.name = snakegame1
+package.domain = org.shipit
 
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+source.dir = .
+source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,txt,json,html,js,css,mp3,wav,ogg,gif,xml
+source.exclude_exts = spec,pyc,pyo
+source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pycache__
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+version = 0.1.0
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
-          python3-virtualenv autoconf libtool pkg-config zlib1g-dev \
-          libncurses5-dev libncursesw5-dev libtinfo6 cmake libffi-dev \
-          libssl-dev automake autopoint gettext libltdl-dev
+# ПРАВИЛЬНЫЕ ВЕРСИИ
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1
 
-      - name: Install Buildozer and Cython
-        run: |
-          pip install --upgrade pip
-          pip install buildozer==1.5.0 cython==0.29.36 virtualenv
+orientation = landscape
+fullscreen = 0
 
-      - name: Build APK with Buildozer
-        run: |
-          export APP_ANDROID_ACCEPT_SDK_LICENSE=1
-          buildozer -v android debug
+android.api = 33
+android.minapi = 24
+android.ndk = 25b
+android.accept_sdk_license = True
+android.archs = arm64-v8a, armeabi-v7a
+android.logcat_filters = *:S python:D
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk
-          path: bin/*.apk
-          if-no-files-found: warn
+[buildozer]
+log_level = 2
+warn_on_root = 0
