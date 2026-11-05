@@ -147,7 +147,7 @@ class GameWidget(Widget):
         Clock.schedule_interval(self.update, 1/60)
 
     def on_size(self, instance, value):
-        # Позиция джойстика пересчитывается динамически при повороте экрана
+        # Пересчитываем позицию джойстика под реальный размер экрана
         self.joy_center = (self.width - 120, 120)
         self.joy_radius = min(self.width, self.height) * 0.12
 
@@ -434,8 +434,10 @@ class GameWidget(Widget):
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
+            # РИСУЕМ ФОН НА ВЕСЬ РЕАЛЬНЫЙ РАЗМЕР ЭКРАНА
             Color(*C_BG); Rectangle(pos=(0, 0), size=(self.width, self.height))
             
+            # ЦЕНТРИРУЕМ КАМЕРУ ОТНОСИТЕЛЬНО РЕАЛЬНЫХ ШИРИНЫ И ВЫСОТЫ
             ox = self.snake.head[0] - self.width / 2
             oy = self.snake.head[1] - self.height / 2
             def screen(x, y): return x - ox, y - oy
@@ -476,6 +478,7 @@ class GameWidget(Widget):
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
+            # ДЖОЙСТИК (привязан к self.width и self.height)
             jx, jy = self.joy_center
             Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-self.joy_radius, jy-self.joy_radius), size=(self.joy_radius*2, self.joy_radius*2))
             Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, self.joy_radius), width=2)
@@ -484,6 +487,7 @@ class GameWidget(Widget):
             knob_y = jy + hy * (self.joy_radius * 0.5)
             Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 15, knob_y - 15), size=(30, 30))
             
+            # КНОПКА OK (привязана к верхнему левому углу)
             Color(0.2, 0.3, 0.2); Rectangle(pos=(20, self.height-100), size=(80, 80))
             Color(1, 1, 1); Line(rectangle=(20, self.height-100, 80, 80), width=2)
 
@@ -531,8 +535,8 @@ class GameWidget(Widget):
 
 class SnakeApp(App):
     def build(self):
-        # Используем FloatLayout и растягиваем игру на весь экран
         root = FloatLayout()
+        # Заставляем GameWidget занять ВЕСЬ экран
         self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
         root.add_widget(self.game)
         
