@@ -1,4 +1,4 @@
-name: Shipit Cloud Build
+name: Build Kivy APK
 
 on:
   push:
@@ -6,18 +6,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ИСПОЛЬЗУЕМ PYTHON 3.9, А НЕ 3.11 (он стабильнее для pyjnius)
-      - name: Set up Python 3.9
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.11'
 
       - name: Install system dependencies
         run: |
@@ -30,8 +29,7 @@ jobs:
       - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
-          # ФИКСАЦИЯ ВЕРСИЙ: Cython < 3.0 обязателен для Kivy
-          pip install buildozer cython==0.29.36 virtualenv
+          pip install buildozer==1.5.0 cython==0.29.36 virtualenv
 
       - name: Build APK with Buildozer
         run: |
@@ -44,15 +42,3 @@ jobs:
           name: apk
           path: bin/*.apk
           if-no-files-found: warn
-
-      - name: Create GitHub Release with APK
-        if: success()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: shipit-${{ github.run_number }}
-          name: Shipit Build #${{ github.run_number }}
-          files: bin/*.apk
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
