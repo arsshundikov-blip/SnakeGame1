@@ -147,6 +147,7 @@ class GameWidget(Widget):
         Clock.schedule_interval(self.update, 1/60)
 
     def on_size(self, instance, value):
+        # Позиция джойстика пересчитывается динамически при повороте экрана
         self.joy_center = (self.width - 120, 120)
         self.joy_radius = min(self.width, self.height) * 0.12
 
@@ -435,8 +436,8 @@ class GameWidget(Widget):
         with self.canvas:
             Color(*C_BG); Rectangle(pos=(0, 0), size=(self.width, self.height))
             
-            ox = self.snake.head[0] - Window.width / 2
-            oy = self.snake.head[1] - Window.height / 2
+            ox = self.snake.head[0] - self.width / 2
+            oy = self.snake.head[1] - self.height / 2
             def screen(x, y): return x - ox, y - oy
 
             for st in self.stations:
@@ -486,7 +487,6 @@ class GameWidget(Widget):
             Color(0.2, 0.3, 0.2); Rectangle(pos=(20, self.height-100), size=(80, 80))
             Color(1, 1, 1); Line(rectangle=(20, self.height-100, 80, 80), width=2)
 
-            # Меню улучшений
             if self.show_upgrade:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
@@ -500,7 +500,6 @@ class GameWidget(Widget):
                     lbl.refresh()
                     Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
 
-            # Меню станции
             if self.station_menu:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
@@ -516,7 +515,6 @@ class GameWidget(Widget):
                     lbl.refresh()
                     Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
 
-            # Режим перестановки
             if self.reorder_mode:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=24, bold=True, color=(1, 0.8, 0.3, 1))
@@ -533,8 +531,9 @@ class GameWidget(Widget):
 
 class SnakeApp(App):
     def build(self):
+        # Используем FloatLayout и растягиваем игру на весь экран
         root = FloatLayout()
-        self.game = GameWidget()
+        self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
         root.add_widget(self.game)
         
         self.hud = Label(text="HP: 100 | Lvl: 1 | Wave: 0 | $: 0", 
