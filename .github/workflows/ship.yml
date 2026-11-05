@@ -29,11 +29,17 @@ jobs:
       - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
+          # Ставим стабильные версии
           pip install buildozer==1.5.0 cython==0.29.36 virtualenv
 
       - name: Build APK with Buildozer
+        env:
+          # ВОТ ГЛАВНЫЙ ФИКС: отключаем проверку pip, чтобы не было ошибки open_rich_spinner
+          PIP_DISABLE_PIP_VERSION_CHECK: 1
+          PIP_NO_PYTHON_VERSION_WARNING: 1
         run: |
           export APP_ANDROID_ACCEPT_SDK_LICENSE=1
+          export PIP_NO_BUILD_ISOLATION=0
           buildozer -v android debug 2>&1 | tee build.log
 
       - name: Upload Build Log
