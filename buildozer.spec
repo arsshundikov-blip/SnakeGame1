@@ -11,7 +11,7 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 
 version = 0.1.0
 
-# УБРАЛИ СЛОВО "android" ОТСЮДА
+# УБРАЛИ ВЕРСИЮ У pyjnius и оставили только arm64-v8a
 requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,openssl,sqlite3,pyjnius,setuptools,certifi,charset-normalizer,idna,urllib3,requests
 
 orientation = landscape
@@ -21,7 +21,9 @@ android.api = 33
 android.minapi = 24
 android.ndk = 25b
 android.accept_sdk_license = True
-android.archs = arm64-v8a, armeabi-v7a
+
+# ОСТАВИЛИ ТОЛЬКО СОВРЕМЕННУЮ АРХИТЕКТУРУ
+android.archs = arm64-v8a
 android.logcat_filters = *:S python:D
 
 [buildozer]
