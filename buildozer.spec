@@ -1,55 +1,44 @@
-[app]
+name: Build Kivy APK
 
-# (str) Title of your application
-title = Snakegame1
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-# (str) Package name
-package.name = snakegame1
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-# (str) Package domain (needed for android/ios packaging)
-package.domain = org.shipit
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-# (str) Source code where the main.py live
-source.dir = .
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip \
+          python3-virtualenv autoconf libtool pkg-config zlib1g-dev \
+          libncurses5-dev libncursesw5-dev libtinfo6 cmake libffi-dev \
+          libssl-dev automake autopoint gettext libltdl-dev
 
-# (list) Source files to include
-source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,txt,json,html,js,css,mp3,wav,ogg,gif,xml
+      - name: Install Buildozer and Cython
+        run: |
+          pip install --upgrade pip
+          pip install buildozer==1.5.0 cython==0.29.36 virtualenv
 
-# (list) Source files to exclude
-source.exclude_exts = spec,pyc,pyo
+      - name: Build APK with Buildozer
+        run: |
+          export APP_ANDROID_ACCEPT_SDK_LICENSE=1
+          buildozer -v android debug
 
-# (list) List of directory to exclude
-source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pycache__
-
-# (str) Application versioning
-version = 0.1.0
-
-# (list) Application requirements (comma separated)
-# ФИКС: 3.13.9 (последняя для Kivy 2.3.1) + библиотеки, чтобы обойти баг с Python 3.14
-requirements = python3==3.13.9,hostpython3==3.13.9,kivy==2.3.1,openssl,sqlite3,pyjnius,android,setuptools,certifi,charset-normalizer,idna,urllib3,requests
-
-# (str) Supported orientation
-orientation = landscape
-
-# (bool) Indicate if the application should be fullscreen or not
-fullscreen = 0
-
-#------------------------------------------------------------------------------
-# Android specific
-#------------------------------------------------------------------------------
-
-android.api = 33
-android.minapi = 24
-android.ndk = 25b
-android.accept_sdk_license = True
-android.archs = arm64-v8a, armeabi-v7a
-android.logcat_filters = *:S python:D
-
-#------------------------------------------------------------------------------
-# Buildozer settings
-#------------------------------------------------------------------------------
-
-[buildozer]
-
-log_level = 2
-warn_on_root = 0
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: bin/*.apk
+          if-no-files-found: warn
