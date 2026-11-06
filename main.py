@@ -2,7 +2,9 @@ import kivy
 kivy.require('2.0.0')
 
 from kivy.config import Config
-# Отключаем автоматическое сглаживание и берем реальный размер
+# ЖЕСТКО ЗАДАЕМ РАЗРЕШЕНИЕ ТВОЕГО ТЕЛЕФОНА
+Config.set('graphics', 'width', '2772')
+Config.set('graphics', 'height', '1280')
 Config.set('graphics', 'multisamples', '0')
 
 from kivy.app import App
@@ -24,6 +26,10 @@ SNAKE_SPEED_PER_BOOST = 0.25
 MAX_BOOSTERS = 10
 MAX_HEALS = 10
 HEAD_MAX_HP = 100
+
+# Размеры экрана для расчетов
+SCREEN_W = 2772
+SCREEN_H = 1280
 
 C_BG = (0.05, 0.06, 0.09)
 C_HEAD = (0.55, 1.0, 0.7)
@@ -145,15 +151,16 @@ class GameWidget(Widget):
         self.station_menu = False
         self.reorder_mode, self.reorder_sel = False, 0
         
-        self.joy_center = (100, 100)
-        self.joy_radius = 60
+        # Джойстик под правый нижний угол твоего экрана
+        self.joy_center = (SCREEN_W - 150, 150)
+        self.joy_radius = 80
         
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
 
     def on_size(self, instance, value):
-        self.joy_center = (self.width - 120, 120)
-        self.joy_radius = min(self.width, self.height) * 0.12
+        self.joy_center = (SCREEN_W - 150, 150)
+        self.joy_radius = 80
 
     def reset(self):
         self.snake = Snake()
@@ -376,18 +383,18 @@ class GameWidget(Widget):
         if self.show_upgrade:
             for i in range(3):
                 if i < len(self.upgrade_options):
-                    bx = self.width/2 - 200
-                    by = self.height/2 + 50 - i*60
-                    if bx <= touch.x <= bx + 400 and by <= touch.y <= by + 50:
+                    bx = SCREEN_W/2 - 400
+                    by = SCREEN_H/2 + 100 - i*120
+                    if bx <= touch.x <= bx + 800 and by <= touch.y <= by + 100:
                         self.apply_upgrade(i)
                         return True
             return True
 
         if self.station_menu:
             for i in range(4):
-                bx = self.width/2 - 250
-                by = self.height/2 + 80 - i*60
-                if bx <= touch.x <= bx + 500 and by <= touch.y <= by + 50:
+                bx = SCREEN_W/2 - 500
+                by = SCREEN_H/2 + 160 - i*120
+                if bx <= touch.x <= bx + 1000 and by <= touch.y <= by + 100:
                     if i == 0: self.station_repair()
                     elif i == 1: 
                         self.station_menu = False; self.reorder_mode = True; self.reorder_sel = 0
@@ -398,14 +405,14 @@ class GameWidget(Widget):
 
         if self.reorder_mode:
             for i in range(len(self.snake.modules)):
-                bx = self.width/2 - 250
-                by = self.height - 150 - i*40
-                if bx <= touch.x <= bx + 500 and by <= touch.y <= by + 30:
+                bx = SCREEN_W/2 - 500
+                by = SCREEN_H - 300 - i*80
+                if bx <= touch.x <= bx + 1000 and by <= touch.y <= by + 60:
                     if i < len(self.snake.modules) - 1:
                         mods = self.snake.modules
                         mods[i], mods[i+1] = mods[i+1], mods[i]
                     return True
-            if touch.x < 120 and touch.y > self.height - 120:
+            if touch.x < 240 and touch.y > SCREEN_H - 240:
                 self.reorder_mode = False
             return True
 
@@ -426,7 +433,7 @@ class GameWidget(Widget):
 
     def _handle_joystick(self, x, y, cx, cy):
         dx, dy = x - cx, y - cy
-        if math.hypot(dx, dy) > 15:
+        if math.hypot(dx, dy) > 30:
             l = math.hypot(dx, dy)
             self.snake.dir = [dx/l, dy/l]
             self.redraw()
@@ -434,14 +441,10 @@ class GameWidget(Widget):
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
-            # Берем РЕАЛЬНЫЕ размеры экрана
-            W = self.width
-            H = self.height
+            Color(*C_BG); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
             
-            Color(*C_BG); Rectangle(pos=(0, 0), size=(W, H))
-            
-            ox = self.snake.head[0] - W / 2
-            oy = self.snake.head[1] - H / 2
+            ox = self.snake.head[0] - SCREEN_W / 2
+            oy = self.snake.head[1] - SCREEN_H / 2
             def screen(x, y): return x - ox, y - oy
 
             for st in self.stations:
@@ -456,8 +459,8 @@ class GameWidget(Widget):
             for e in self.enemies:
                 sx, sy = screen(e.x, e.y)
                 Color(*e.color); Ellipse(pos=(sx-e.radius, sy-e.radius), size=(e.radius*2, e.radius*2))
-                Color(*C_RED); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28, 4))
-                Color(*C_GREEN); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28*max(0,min(1,e.hp/e.max_hp)), 4))
+                Color(*C_RED); Rectangle(pos=(sx-28, sy-e.radius-16), size=(56, 8))
+                Color(*C_GREEN); Rectangle(pos=(sx-28, sy-e.radius-16), size=(56*max(0,min(1,e.hp/e.max_hp)), 8))
 
             for b in self.bullets:
                 sx, sy = screen(b.x, b.y)
@@ -474,96 +477,136 @@ class GameWidget(Widget):
                 if i >= len(mpos): continue
                 mx, my = screen(mpos[i][0], mpos[i][1])
                 Color(*MOD_COLORS[m.mtype]); Rectangle(pos=(mx-CELL*0.3, my-CELL*0.3), size=(CELL*0.6, CELL*0.6))
-                Color(*C_RED); Rectangle(pos=(mx-12, my-CELL*0.8), size=(24, 4))
-                Color(*C_GREEN); Rectangle(pos=(mx-12, my-CELL*0.8), size=(24*max(0,min(1,m.hp/m.max_hp)), 4))
+                Color(*C_RED); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48, 8))
+                Color(*C_GREEN); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48*max(0,min(1,m.hp/m.max_hp)), 8))
             
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            # Джойстик (привязан к W и H)
-            jx, jy = (W - 120, 120)
-            self.joy_center = (jx, jy)
-            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-60, jy-60), size=(120, 120))
-            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, 60), width=2)
+            jx, jy = self.joy_center
+            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-self.joy_radius, jy-self.joy_radius), size=(self.joy_radius*2, self.joy_radius*2))
+            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, self.joy_radius), width=4)
             hx, hy = s.dir[0], s.dir[1]
-            knob_x = jx + hx * 30
-            knob_y = jy + hy * 30
-            Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 15, knob_y - 15), size=(30, 30))
-            
-            # Кнопка паузы (привязана к H)
-            Color(0.2, 0.3, 0.2); Rectangle(pos=(20, H-100), size=(80, 80))
-            Color(1, 1, 1); Line(rectangle=(20, H-100, 80, 80), width=2)
+            knob_x = jx + hx * (self.joy_radius * 0.5)
+            knob_y = jy + hy * (self.joy_radius * 0.5)
+            Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 30, knob_y - 30), size=(60, 60))
+
+            # Кнопка паузы
+            Color(0.2, 0.3, 0.2); Rectangle(pos=(40, SCREEN_H-200), size=(160, 160))
+            Color(1, 1, 1); Line(rectangle=(40, SCREEN_H-200, 160, 160), width=4)
 
             # Меню
             if self.show_upgrade:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(W, H))
-                lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=56, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(W/2 - lbl_title.texture.width/2, H/2 + 120), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.width/2, SCREEN_H/2 + 240), size=lbl_title.texture.size)
                 for i, (label, _) in enumerate(self.upgrade_options):
-                    bx = W/2 - 200
-                    by = H/2 + 50 - i*60
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 400, 50), width=2)
-                    lbl = CoreLabel(text=f"{i+1}. {label}", font_size=20, color=(1, 1, 1, 1))
+                    bx = SCREEN_W/2 - 400
+                    by = SCREEN_H/2 + 100 - i*120
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 800, 100), width=4)
+                    lbl = CoreLabel(text=f"{i+1}. {label}", font_size=40, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 20), size=lbl.texture.size)
 
             if self.station_menu:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(W, H))
-                lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=28, bold=True, color=(1, 0.8, 0.3, 1))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=56, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(W/2 - lbl_title.texture.width/2, H/2 + 150), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.width/2, SCREEN_H/2 + 300), size=lbl_title.texture.size)
                 
                 opts = [f"1. Восстановить ({len(s.lost_modules)*8}$)", "2. Переставить модули", "3. Лечение (25%)", "4. Выйти"]
                 for i, text in enumerate(opts):
-                    bx = W/2 - 250
-                    by = H/2 + 80 - i*60
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 50), width=2)
-                    lbl = CoreLabel(text=text, font_size=20, color=(1, 1, 1, 1))
+                    bx = SCREEN_W/2 - 500
+                    by = SCREEN_H/2 + 160 - i*120
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 100), width=4)
+                    lbl = CoreLabel(text=text, font_size=40, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 20), size=lbl.texture.size)
 
             if self.reorder_mode:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(W, H))
-                lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=24, bold=True, color=(1, 0.8, 0.3, 1))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=48, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(W/2 - lbl_title.texture.size[0]/2, H - 100), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.size[0]/2, SCREEN_H - 200), size=lbl_title.texture.size)
                 
                 for i, m in enumerate(s.modules):
-                    bx = W/2 - 250
-                    by = H - 150 - i*40
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 30), width=1)
-                    lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}", font_size=18, color=(1, 1, 1, 1))
+                    bx = SCREEN_W/2 - 500
+                    by = SCREEN_H - 300 - i*80
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 60), width=2)
+                    lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}", font_size=36, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 5), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 10), size=lbl.texture.size)
+
+class MainMenu(FloatLayout):
+    def __init__(self, start_callback, exit_callback, **kwargs):
+        super().__init__(**kwargs)
+        
+        with self.canvas.before:
+            Color(0.05, 0.06, 0.09, 1)
+            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self.update_bg, size=self.update_bg)
+
+        # Кнопки (увеличенные под экран телефона)
+        btn_start = Button(text="НАЧАТЬ ИГРУ", 
+                           size_hint=(None, None), size=(600, 160),
+                           pos_hint={'center_x': 0.5, 'center_y': 0.6},
+                           background_color=(0.2, 0.7, 0.4, 1), font_size='48sp')
+        btn_start.bind(on_press=start_callback)
+        
+        btn_exit = Button(text="ВЫЙТИ", 
+                          size_hint=(None, None), size=(600, 160),
+                          pos_hint={'center_x': 0.5, 'center_y': 0.4},
+                          background_color=(0.8, 0.2, 0.2, 1), font_size='48sp')
+        btn_exit.bind(on_press=exit_callback)
+        
+        title = Label(text="ЗМЕЙКА-РОГАЛИК", 
+                      pos_hint={'center_x': 0.5, 'center_y': 0.8},
+                      font_size='72sp', bold=True, color=(1, 0.8, 0.3, 1))
+
+        self.add_widget(title)
+        self.add_widget(btn_start)
+        self.add_widget(btn_exit)
+
+    def update_bg(self, *args):
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
 
 class SnakeApp(App):
     def build(self):
         self.root = FloatLayout()
+        
+        self.menu = MainMenu(start_callback=self.start_game, exit_callback=self.stop)
+        self.root.add_widget(self.menu)
+        
+        return self.root
+
+    def start_game(self, instance):
+        self.root.remove_widget(self.menu)
+        
         self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
         self.root.add_widget(self.game)
         
         self.hud = Label(text="HP: 100 | Lvl: 1 | Wave: 0 | $: 0", 
                          pos_hint={'x': 0.01, 'top': 0.99}, size_hint=(0.5, 0.1),
-                         color=(1, 1, 1, 1), font_size='20sp', bold=True, halign='left')
+                         color=(1, 1, 1, 1), font_size='40sp', bold=True, halign='left')
         self.hud.bind(size=self.hud.setter('text_size'))
         self.root.add_widget(self.hud)
         
         self.notify_label = Label(text="", 
                          pos_hint={'x': 0.01, 'top': 0.85}, size_hint=(0.5, 0.1),
-                         color=(1, 0.8, 0.3, 1), font_size='18sp', bold=True, halign='left')
+                         color=(1, 0.8, 0.3, 1), font_size='36sp', bold=True, halign='left')
         self.notify_label.bind(size=self.notify_label.setter('text_size'))
         self.root.add_widget(self.notify_label)
         
-        return self.root
-
-    def on_start(self):
         Clock.schedule_interval(self.update_hud, 0.1)
 
     def update_hud(self, dt):
-        g = self.game; s = g.snake
+        g = getattr(self, 'game', None)
+        if not g: return
+        s = g.snake
         text = f"HP: {int(s.head_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
-        if g.game_over: text += "\nИГРА ОКОНЧЕНА (Жми OK)"
+        if g.game_over: text += "\nИГРА ОКОНЧЕНА"
         self.hud.text = text
         
         if g.message_timer > 0:
@@ -572,5 +615,5 @@ class SnakeApp(App):
             self.notify_label.text = ""
 
 if __name__ == '__main__':
-    Window.size = (800, 600)
+    Window.size = (2772, 1280)
     SnakeApp().run()
