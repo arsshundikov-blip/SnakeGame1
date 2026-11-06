@@ -2,7 +2,7 @@ import kivy
 kivy.require('2.0.0')
 
 from kivy.config import Config
-# ЖЕСТКО ЗАДАЕМ РАЗРЕШЕНИЕ ТВОЕГО ТЕЛЕФОНА
+# ЖЕСТКО ЗАДАЕМ РАЗРЕШЕНИЕ
 Config.set('graphics', 'width', '2772')
 Config.set('graphics', 'height', '1280')
 Config.set('graphics', 'multisamples', '0')
@@ -19,6 +19,10 @@ from kivy.core.text import Label as CoreLabel
 import math
 import random
 
+# Включаем полный экран и скрываем системные панели
+Window.fullscreen = 'auto'
+Window.softinput_mode = 'below_target'
+
 # ---------- Константы ----------
 CELL = 24
 SNAKE_SPEED_BASE = 6.0
@@ -27,7 +31,6 @@ MAX_BOOSTERS = 10
 MAX_HEALS = 10
 HEAD_MAX_HP = 100
 
-# Размеры экрана для расчетов
 SCREEN_W = 2772
 SCREEN_H = 1280
 
@@ -151,15 +154,15 @@ class GameWidget(Widget):
         self.station_menu = False
         self.reorder_mode, self.reorder_sel = False, 0
         
-        # Джойстик под правый нижний угол твоего экрана
-        self.joy_center = (SCREEN_W - 150, 150)
+        # Сдвигаем джойстик немного выше и левее, чтобы он не прятался под панелью
+        self.joy_center = (SCREEN_W - 250, 250)
         self.joy_radius = 80
         
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
 
     def on_size(self, instance, value):
-        self.joy_center = (SCREEN_W - 150, 150)
+        self.joy_center = (SCREEN_W - 250, 250)
         self.joy_radius = 80
 
     def reset(self):
@@ -491,11 +494,9 @@ class GameWidget(Widget):
             knob_y = jy + hy * (self.joy_radius * 0.5)
             Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 30, knob_y - 30), size=(60, 60))
 
-            # Кнопка паузы
             Color(0.2, 0.3, 0.2); Rectangle(pos=(40, SCREEN_H-200), size=(160, 160))
             Color(1, 1, 1); Line(rectangle=(40, SCREEN_H-200, 160, 160), width=4)
 
-            # Меню
             if self.show_upgrade:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
                 lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=56, bold=True, color=(1, 0.8, 0.3, 1))
@@ -547,7 +548,6 @@ class MainMenu(FloatLayout):
             self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self.update_bg, size=self.update_bg)
 
-        # Кнопки (увеличенные под экран телефона)
         btn_start = Button(text="НАЧАТЬ ИГРУ", 
                            size_hint=(None, None), size=(600, 160),
                            pos_hint={'center_x': 0.5, 'center_y': 0.6},
