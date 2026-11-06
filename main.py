@@ -2,7 +2,6 @@ import kivy
 kivy.require('2.0.0')
 
 from kivy.config import Config
-# Убираем жесткие размеры, пусть Kivy берет размер экрана телефона
 Config.set('graphics', 'multisamples', '0')
 
 from kivy.app import App
@@ -17,7 +16,6 @@ from kivy.core.text import Label as CoreLabel
 import math
 import random
 
-# Включаем полный экран
 Window.fullscreen = 'auto'
 
 # ---------- Константы ----------
@@ -28,7 +26,6 @@ MAX_BOOSTERS = 10
 MAX_HEALS = 10
 HEAD_MAX_HP = 100
 
-# Цвета
 C_BG = (0.05, 0.06, 0.09)
 C_HEAD = (0.55, 1.0, 0.7)
 C_BODY = (0.23, 0.67, 0.39)
@@ -149,16 +146,13 @@ class GameWidget(Widget):
         self.station_menu = False
         self.reorder_mode, self.reorder_sel = False, 0
         
-        self.joy_center = (100, 100)
-        self.joy_radius = 60
+        # Координаты джойстика теперь в процентах от экрана
+        self.joy_x = 0.85
+        self.joy_y = 0.15
+        self.joy_radius = 0.08
         
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
-
-    def on_size(self, instance, value):
-        # Динамически вычисляем джойстик (90% ширины, 15% высоты)
-        self.joy_center = (self.width * 0.85, self.height * 0.15)
-        self.joy_radius = min(self.width, self.height) * 0.08
 
     def reset(self):
         self.snake = Snake()
@@ -414,18 +408,22 @@ class GameWidget(Widget):
                 self.reorder_mode = False
             return True
 
-        joy_x, joy_y = self.joy_center
-        if (touch.x - joy_x)**2 + (touch.y - joy_y)**2 <= self.joy_radius**2:
+        # Проверка джойстика по ПРОЦЕНТАМ
+        jx = self.width * 0.85
+        jy = self.height * 0.15
+        r = min(self.width, self.height) * 0.08
+        if (touch.x - jx)**2 + (touch.y - jy)**2 <= r**2:
             touch.ud['joystick'] = True
-            self._handle_joystick(touch.x, touch.y, joy_x, joy_y)
+            self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
             
         return super().on_touch_down(touch)
 
     def on_touch_move(self, touch):
         if touch.ud.get('joystick'):
-            joy_x, joy_y = self.joy_center
-            self._handle_joystick(touch.x, touch.y, joy_x, joy_y)
+            jx = self.width * 0.85
+            jy = self.height * 0.15
+            self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
         return super().on_touch_move(touch)
 
@@ -484,16 +482,21 @@ class GameWidget(Widget):
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            jx, jy = self.joy_center
-            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-self.joy_radius, jy-self.joy_radius), size=(self.joy_radius*2, self.joy_radius*2))
-            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, self.joy_radius), width=4)
+            # Джойстик
+            jx = W * 0.85
+            jy = H * 0.15
+            r = min(W, H) * 0.08
+            
+            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
+            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, r), width=4)
             hx, hy = s.dir[0], s.dir[1]
-            knob_x = jx + hx * (self.joy_radius * 0.5)
-            knob_y = jy + hy * (self.joy_radius * 0.5)
+            knob_x = jx + hx * (r * 0.5)
+            knob_y = jy + hy * (r * 0.5)
             Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 15, knob_y - 15), size=(30, 30))
 
-            Color(0.2, 0.3, 0.2); Rectangle(pos=(20, H-100), size=(80, 80))
-            Color(1, 1, 1); Line(rectangle=(20, H-100, 80, 80), width=2)
+            # Кнопка паузы (5% от края)
+            Color(0.2, 0.3, 0.2); Rectangle(pos=(W*0.02, H*0.85), size=(W*0.1, W*0.1))
+            Color(1, 1, 1); Line(rectangle=(W*0.02, H*0.85, W*0.1, W*0.1), width=2)
 
             if self.show_upgrade:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(W, H))
