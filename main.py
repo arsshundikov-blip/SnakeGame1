@@ -525,4 +525,61 @@ class GameWidget(Widget):
                 for i, text in enumerate(opts):
                     bx = 400 - 250
                     by = 300 + 80 - i*60
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 50), width=2)
+                    lbl = CoreLabel(text=text, font_size=20, color=(1, 1, 1, 1))
+                    lbl.refresh()
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 10), size=lbl.texture.size)
+
+            if self.reorder_mode:
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(800, 600))
+                lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=24, bold=True, color=(1, 0.8, 0.3, 1))
+                lbl_title.refresh()
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(400 - lbl_title.texture.size[0]/2, 600 - 100), size=lbl_title.texture.size)
+                
+                for i, m in enumerate(s.modules):
+                    bx = 400 - 250
+                    by = 600 - 150 - i*40
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 500, 30), width=1)
+                    lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}", font_size=18, color=(1, 1, 1, 1))
+                    lbl.refresh()
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 10, by + 5), size=lbl.texture.size)
+
+            PopMatrix()
+
+class SnakeApp(App):
+    def build(self):
+        root = FloatLayout()
+        self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
+        root.add_widget(self.game)
+        
+        self.hud = Label(text="HP: 100 | Lvl: 1 | Wave: 0 | $: 0", 
+                         pos_hint={'x': 0.01, 'top': 0.99}, size_hint=(0.5, 0.1),
+                         color=(1, 1, 1, 1), font_size='20sp', bold=True, halign='left')
+        self.hud.bind(size=self.hud.setter('text_size'))
+        root.add_widget(self.hud)
+        
+        self.notify_label = Label(text="", 
+                         pos_hint={'x': 0.01, 'top': 0.85}, size_hint=(0.5, 0.1),
+                         color=(1, 0.8, 0.3, 1), font_size='18sp', bold=True, halign='left')
+        self.notify_label.bind(size=self.notify_label.setter('text_size'))
+        root.add_widget(self.notify_label)
+        
+        return root
+
+    def on_start(self):
+        Clock.schedule_interval(self.update_hud, 0.1)
+
+    def update_hud(self, dt):
+        g = self.game; s = g.snake
+        text = f"HP: {int(s.head_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
+        if g.game_over: text += "\nИГРА ОКОНЧЕНА (Жми OK)"
+        self.hud.text = text
+        
+        if g.message_timer > 0:
+            self.notify_label.text = g.message
+        else:
+            self.notify_label.text = ""
+
+if __name__ == '__main__':
+    Window.size = (800, 600)
+    SnakeApp().run()
