@@ -147,39 +147,48 @@ class GameWidget(Widget):
         
         self.message, self.message_timer = "", 0.0
         self.station_menu = False
-        self.station_btn_repair = None
-        self.station_btn_reorder = None
-        self.station_btn_heal = None
-        self.station_btn_exit = None
+        self.station_ref = None
         
-        self.reorder_mode, self.reorder_sel = False, 0
-        self.reorder_buttons = []
-        
-        self.upgrade_buttons = []
-        self.pause_button = None
+        self.reorder_mode = False
         
         self.joy_center = (SCREEN_W * 0.85, SCREEN_H * 0.15)
-        # Радиус джойстика увеличен в 1.8 раза (было 0.08, стало 0.14)
         self.joy_radius = min(SCREEN_W, SCREEN_H) * 0.14 
         
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
         
-        # Создаем кнопку паузы сразу
-        self.create_pause_button()
-
-    def create_pause_button(self):
+        # Прозрачная кнопка паузы
         self.pause_button = Button(text="", 
                                    size_hint=(None, None), 
                                    size=(SCREEN_W*0.1, SCREEN_W*0.1),
                                    pos=(SCREEN_W*0.02, SCREEN_H*0.85),
-                                   background_color=(0,0,0,0)) # Прозрачная
+                                   background_color=(0,0,0,0))
         self.pause_button.bind(on_press=self.toggle_pause)
         self.add_widget(self.pause_button)
+        
+        # Создаем 4 невидимые кнопки для меню (чтобы не тормозило)
+        self.menu_btns = []
+        for i in range(4):
+            btn = Button(text="", size_hint=(None, None), size=(1000, 120),
+                         pos=(0, 0), background_color=(0,0,0,0), opacity=0)
+            btn.bind(on_press=lambda inst, idx=i: self.menu_action(idx))
+            self.menu_btns.append(btn)
+            self.add_widget(btn)
 
     def toggle_pause(self, instance):
         if not self.game_over:
             self.paused = not self.paused
+
+    def menu_action(self, idx):
+        if self.show_upgrade:
+            self.apply_upgrade(idx)
+        elif self.station_menu:
+            if idx == 0: self.station_repair()
+            elif idx == 1: self.start_reorder()
+            elif idx == 2: self.station_heal()
+            elif idx == 3: self.close_station()
+        elif self.reorder_mode:
+            self.confirm_reorder(idx)
 
     def reset(self):
         self.snake = Snake()
@@ -353,7 +362,6 @@ class GameWidget(Widget):
         self.stations = [s for s in self.stations if not s.used]
         x, y = self._random_ring_pos(200, 500); self.stations.append(Station(x, y))
 
-    # --- МЕНЮ УЛУЧШЕНИЙ ---
     def open_upgrade(self):
         self.show_upgrade = True
         opts, existing = [], {m.mtype for m in self.snake.modules}
@@ -365,17 +373,13 @@ class GameWidget(Widget):
                 opts.append((f"Новый: {MOD_NAMES[t]}", ('add', t)))
         random.shuffle(opts); self.upgrade_options = opts[:3]
         
-        # Создаем прозрачные кнопки поверх нарисованных
-        self.upgrade_buttons.clear()
-        for i in range(len(self.upgrade_options)):
-            btn = Button(text="", 
-                         size_hint=(None, None), 
-                         size=(800, 100),
-                         pos=(SCREEN_W/2 - 400, SCREEN_H/2 + 100 - i*120),
-                         background_color=(0,0,0,0))
-            btn.bind(on_press=lambda inst, idx=i: self.apply_upgrade(idx))
-            self.upgrade_buttons.append(btn)
-            self.add_widget(btn)
+        # Настраиваем 3 невидимые кнопки
+        for i in range(3):
+            if i < len(self.upgrade_options):
+                self.menu_btns[i].pos = (SCREEN_W/2 - 400, SCREEN_H/2 + 100 - i*140)
+                self.menu_btns[i].opacity = 1
+            else:
+                self.menu_btns[i].opacity = 0
 
     def apply_upgrade(self, idx):
         if 0 <= idx < len(self.upgrade_options):
@@ -384,50 +388,26 @@ class GameWidget(Widget):
                 for m in s.modules:
                     if m.mtype == t: m.level += 1; m.max_hp *= 1.2; m.hp = m.max_hp; break
             else: s.add_module(t)
-        self.show_upgrade = False
-        self.upgrade_options = []
-        for btn in self.upgrade_buttons:
-            self.remove_widget(btn)
-        self.upgrade_buttons.clear()
+        self.show_upgrade = False; self.upgrade_options = []
+        for btn in self.menu_btns: btn.opacity = 0
 
-    # --- СТАНЦИЯ ---
     def open_station(self, st):
         self.station_menu, self.station_ref = True, st; st.used = True
         
-        # Создаем прозрачные кнопки для станции
-        self.station_btn_repair = Button(text="", size_hint=(None, None), size=(1000, 100),
-                                         pos=(SCREEN_W/2 - 500, SCREEN_H/2 + 160), background_color=(0,0,0,0))
-        self.station_btn_repair.bind(on_press=self.station_repair)
-        
-        self.station_btn_reorder = Button(text="", size_hint=(None, None), size=(1000, 100),
-                                          pos=(SCREEN_W/2 - 500, SCREEN_H/2 + 40), background_color=(0,0,0,0))
-        self.station_btn_reorder.bind(on_press=self.start_reorder)
-        
-        self.station_btn_heal = Button(text="", size_hint=(None, None), size=(1000, 100),
-                                       pos=(SCREEN_W/2 - 500, SCREEN_H/2 - 80), background_color=(0,0,0,0))
-        self.station_btn_heal.bind(on_press=self.station_heal)
-        
-        self.station_btn_exit = Button(text="", size_hint=(None, None), size=(1000, 100),
-                                       pos=(SCREEN_W/2 - 500, SCREEN_H/2 - 200), background_color=(0,0,0,0))
-        self.station_btn_exit.bind(on_press=self.close_station)
-        
-        self.add_widget(self.station_btn_repair)
-        self.add_widget(self.station_btn_reorder)
-        self.add_widget(self.station_btn_heal)
-        self.add_widget(self.station_btn_exit)
+        # Настраиваем 4 невидимые кнопки (расстояние 140)
+        for i in range(4):
+            self.menu_btns[i].pos = (SCREEN_W/2 - 500, SCREEN_H/2 + 160 - i*140)
+            self.menu_btns[i].opacity = 1
 
-    def close_station(self, instance):
+    def close_station(self):
         self.station_menu = False
-        self.remove_widget(self.station_btn_repair)
-        self.remove_widget(self.station_btn_reorder)
-        self.remove_widget(self.station_btn_heal)
-        self.remove_widget(self.station_btn_exit)
+        for btn in self.menu_btns: btn.opacity = 0
 
-    def station_repair(self, instance):
+    def station_repair(self):
         s = self.snake
-        if not s.lost_modules: self.msg("Нет потерянных"); self.close_station(None); return
+        if not s.lost_modules: self.msg("Нет потерянных"); self.close_station(); return
         cost = len(s.lost_modules)*8
-        if s.money < cost: self.msg(f"Нужно {cost}"); self.close_station(None); return
+        if s.money < cost: self.msg(f"Нужно {cost}"); self.close_station(); return
         s.money -= cost
         restored, s.lost_modules = s.lost_modules[:], []; cnt = 0
         for t in restored:
@@ -435,51 +415,44 @@ class GameWidget(Widget):
             if t == MOD_BOOSTER and s.boosters >= MAX_BOOSTERS: continue
             if s.add_module(t): cnt += 1
         self.msg(f"Восстановлено: {cnt}")
-        self.close_station(None)
+        self.close_station()
 
-    def station_heal(self, instance):
+    def station_heal(self):
         heal = self.snake.head_max_hp * 0.25
         self.snake.head_hp = min(self.snake.head_max_hp, self.snake.head_hp + heal)
         self.msg("Хил 25%")
-        self.close_station(None)
+        self.close_station()
 
-    # --- ПЕРЕСТАНОВКА ---
-    def start_reorder(self, instance):
-        self.close_station(None)
+    def start_reorder(self):
+        self.close_station()
         if len(self.snake.modules) < 2:
             self.msg("Мало модулей")
             return
         self.reorder_mode = True
-        self.reorder_sel = 0
-        self.create_reorder_buttons()
-
-    def create_reorder_buttons(self):
-        self.reorder_buttons.clear()
-        for i in range(len(self.snake.modules)):
-            btn = Button(text="", size_hint=(None, None), size=(1000, 60),
-                         pos=(SCREEN_W/2 - 500, SCREEN_H - 300 - i*80), background_color=(0,0,0,0))
-            btn.bind(on_press=lambda inst, idx=i: self.confirm_reorder(idx))
-            self.reorder_buttons.append(btn)
-            self.add_widget(btn)
+        
+        for i in range(4):
+            if i < len(self.snake.modules):
+                self.menu_btns[i].pos = (SCREEN_W/2 - 500, SCREEN_H - 300 - i*140)
+                self.menu_btns[i].opacity = 1
+            else:
+                self.menu_btns[i].opacity = 0
 
     def confirm_reorder(self, idx):
         if idx < len(self.snake.modules) - 1:
             mods = self.snake.modules
             mods[idx], mods[idx+1] = mods[idx+1], mods[idx]
         self.reorder_mode = False
-        for btn in self.reorder_buttons:
-            self.remove_widget(btn)
-        self.reorder_buttons.clear()
+        for btn in self.menu_btns: btn.opacity = 0
 
-    # --- ОБРАБОТКА КАСАНИЙ ---
     def on_touch_down(self, touch):
-        # Если открыты меню, кнопки уже обрабатывают касания, мы просто пропускаем
         if self.show_upgrade or self.station_menu or self.reorder_mode:
             return super().on_touch_down(touch)
 
-        # Джойстик (увеличенный)
-        jx, jy = self.joy_center
-        if (touch.x - jx)**2 + (touch.y - jy)**2 <= self.joy_radius**2:
+        # Джойстик (привязан к self.width)
+        jx = self.width * 0.85
+        jy = self.height * 0.15
+        r = min(self.width, self.height) * 0.14
+        if (touch.x - jx)**2 + (touch.y - jy)**2 <= r**2:
             touch.ud['joystick'] = True
             self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
@@ -488,7 +461,8 @@ class GameWidget(Widget):
 
     def on_touch_move(self, touch):
         if touch.ud.get('joystick'):
-            jx, jy = self.joy_center
+            jx = self.width * 0.85
+            jy = self.height * 0.15
             self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
         return super().on_touch_move(touch)
@@ -545,9 +519,10 @@ class GameWidget(Widget):
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            # Джойстик (увеличенный)
-            jx, jy = self.joy_center
-            r = self.joy_radius
+            # Джойстик (привязан к self.width)
+            jx = self.width * 0.85
+            jy = self.height * 0.15
+            r = min(self.width, self.height) * 0.14
             Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
             Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, r), width=6)
             hx, hy = s.dir[0], s.dir[1]
@@ -555,51 +530,50 @@ class GameWidget(Widget):
             knob_y = jy + hy * (r * 0.5)
             Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 40, knob_y - 40), size=(80, 80))
 
-            # Кнопка паузы (просто рисуем, нажатие обрабатывает прозрачная Kivy-кнопка)
-            Color(0.2, 0.3, 0.2); Rectangle(pos=(SCREEN_W*0.02, SCREEN_H*0.85), size=(SCREEN_W*0.1, SCREEN_W*0.1))
-            Color(1, 1, 1); Line(rectangle=(SCREEN_W*0.02, SCREEN_H*0.85, SCREEN_W*0.1, SCREEN_W*0.1), width=4)
+            Color(0.2, 0.3, 0.2); Rectangle(pos=(self.width*0.02, self.height*0.85), size=(self.width*0.1, self.width*0.1))
+            Color(1, 1, 1); Line(rectangle=(self.width*0.02, self.height*0.85, self.width*0.1, self.width*0.1), width=4)
 
             if self.show_upgrade:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=56, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.width/2, SCREEN_H/2 + 240), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.width/2, self.height/2 + 280), size=lbl_title.texture.size)
                 for i, (label, _) in enumerate(self.upgrade_options):
-                    bx = SCREEN_W/2 - 400
-                    by = SCREEN_H/2 + 100 - i*120
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 800, 100), width=4)
+                    bx = self.width/2 - 400
+                    by = self.height/2 + 100 - i*140
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 800, 120), width=4)
                     lbl = CoreLabel(text=f"{i+1}. {label}", font_size=40, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 20), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 30), size=lbl.texture.size)
 
             if self.station_menu:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=56, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.width/2, SCREEN_H/2 + 300), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.width/2, self.height/2 + 340), size=lbl_title.texture.size)
                 
                 opts = [f"1. Восстановить ({len(s.lost_modules)*8}$)", "2. Переставить модули", "3. Лечение (25%)", "4. Выйти"]
                 for i, text in enumerate(opts):
-                    bx = SCREEN_W/2 - 500
-                    by = SCREEN_H/2 + 160 - i*120
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 100), width=4)
+                    bx = self.width/2 - 500
+                    by = self.height/2 + 160 - i*140
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 120), width=4)
                     lbl = CoreLabel(text=text, font_size=40, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 20), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 30), size=lbl.texture.size)
 
             if self.reorder_mode:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)", font_size=48, bold=True, color=(1, 0.8, 0.3, 1))
                 lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(SCREEN_W/2 - lbl_title.texture.size[0]/2, SCREEN_H - 200), size=lbl_title.texture.size)
+                Color(1, 1, 1); Rectangle(texture=lbl_title.texture, pos=(self.width/2 - lbl_title.texture.size[0]/2, self.height - 200), size=lbl_title.texture.size)
                 
                 for i, m in enumerate(s.modules):
-                    bx = SCREEN_W/2 - 500
-                    by = SCREEN_H - 300 - i*80
-                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 60), width=2)
+                    bx = self.width/2 - 500
+                    by = self.height - 300 - i*140
+                    Color(1, 1, 1); Line(rectangle=(bx, by, 1000, 120), width=2)
                     lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}", font_size=36, color=(1, 1, 1, 1))
                     lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 10), size=lbl.texture.size)
+                    Color(1, 1, 1); Rectangle(texture=lbl.texture, pos=(bx + 20, by + 30), size=lbl.texture.size)
 
 class MainMenu(FloatLayout):
     def __init__(self, start_callback, exit_callback, **kwargs):
