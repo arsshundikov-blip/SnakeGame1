@@ -42,6 +42,8 @@ C_ENEMY_BULLET = (1.0, 0.39, 0.39)
 C_STATION = (1.0, 0.78, 0.23)
 C_RED = (0.6, 0, 0)
 C_GREEN = (0, 0.86, 0.24)
+C_SHIELD = (1.0, 0.86, 0.39)
+C_AXES = (1.0, 0.39, 0.39)
 
 MOD_PISTOL, MOD_RIFLE, MOD_SNIPER = "Pistol", "Rifle", "Sniper"
 MOD_SHIELD, MOD_HEAL, MOD_BOOSTER, MOD_AXES = "Shield", "Heal", "Booster", "Axes"
@@ -151,22 +153,20 @@ class GameWidget(Widget):
         
         self.reorder_mode = False
         
-        self.joy_center = (SCREEN_W * 0.85, SCREEN_H * 0.15)
+        # СДВИГАЕМ ДЖОЙСТИК ВЛЕВО (0.82 вместо 0.85)
+        self.joy_center = (SCREEN_W * 0.82, SCREEN_H * 0.15)
         self.joy_radius = min(SCREEN_W, SCREEN_H) * 0.14 
         
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
         
-        # Прозрачная кнопка паузы
-        self.pause_button = Button(text="", 
-                                   size_hint=(None, None), 
+        self.pause_button = Button(text="", size_hint=(None, None), 
                                    size=(SCREEN_W*0.1, SCREEN_W*0.1),
                                    pos=(SCREEN_W*0.02, SCREEN_H*0.85),
                                    background_color=(0,0,0,0))
         self.pause_button.bind(on_press=self.toggle_pause)
         self.add_widget(self.pause_button)
         
-        # Создаем 4 невидимые кнопки для меню (чтобы не тормозило)
         self.menu_btns = []
         for i in range(4):
             btn = Button(text="", size_hint=(None, None), size=(1000, 120),
@@ -200,9 +200,19 @@ class GameWidget(Widget):
     def msg(self, t, dur=2.0): self.message, self.message_timer = t, dur
 
     def update(self, dt):
-        if self.show_upgrade or self.station_menu or self.reorder_mode or self.game_over or self.paused:
+        if self.game_over:
+            # При проигрыше вызываем выход в меню (через 2 секунды)
+            if self.message_timer > 0:
+                self.message_timer -= dt
+            else:
+                App.get_running_app().go_to_menu()
             self.redraw()
             return
+            
+        if self.show_upgrade or self.station_menu or self.reorder_mode or self.paused:
+            self.redraw()
+            return
+
         s = self.snake
         s.head[0] += s.dir[0] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
         s.head[1] += s.dir[1] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
@@ -264,7 +274,7 @@ class GameWidget(Widget):
                     m.hp -= e.damage * dt * 0.8
             if m.hp <= 0:
                 s.damage_chain(i)
-                if s.had_modules and not s.modules: self.game_over = True; return
+                if s.had_modules and not s.modules: self.game_over = True; self.msg("ИГРА ОКОНЧЕНА", 2.0); return
                 break
                 
         for e in list(self.enemies):
@@ -281,7 +291,7 @@ class GameWidget(Widget):
                 dx, dy = e.x-s.head[0], e.y-s.head[1]; dl = math.hypot(dx, dy) or 1
                 e.x += dx/dl*10; e.y += dy/dl*10
                 
-        if s.head_hp <= 0: self.game_over = True; return
+        if s.head_hp <= 0: self.game_over = True; self.msg("ИГРА ОКОНЧЕНА", 2.0); return
         
         for b in list(self.bullets):
             b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt
@@ -373,7 +383,6 @@ class GameWidget(Widget):
                 opts.append((f"Новый: {MOD_NAMES[t]}", ('add', t)))
         random.shuffle(opts); self.upgrade_options = opts[:3]
         
-        # Настраиваем 3 невидимые кнопки
         for i in range(3):
             if i < len(self.upgrade_options):
                 self.menu_btns[i].pos = (SCREEN_W/2 - 400, SCREEN_H/2 + 100 - i*140)
@@ -394,7 +403,6 @@ class GameWidget(Widget):
     def open_station(self, st):
         self.station_menu, self.station_ref = True, st; st.used = True
         
-        # Настраиваем 4 невидимые кнопки (расстояние 140)
         for i in range(4):
             self.menu_btns[i].pos = (SCREEN_W/2 - 500, SCREEN_H/2 + 160 - i*140)
             self.menu_btns[i].opacity = 1
@@ -448,8 +456,8 @@ class GameWidget(Widget):
         if self.show_upgrade or self.station_menu or self.reorder_mode:
             return super().on_touch_down(touch)
 
-        # Джойстик (привязан к self.width)
-        jx = self.width * 0.85
+        # Джойстик сдвинут влево (0.82)
+        jx = self.width * 0.82
         jy = self.height * 0.15
         r = min(self.width, self.height) * 0.14
         if (touch.x - jx)**2 + (touch.y - jy)**2 <= r**2:
@@ -461,7 +469,7 @@ class GameWidget(Widget):
 
     def on_touch_move(self, touch):
         if touch.ud.get('joystick'):
-            jx = self.width * 0.85
+            jx = self.width * 0.82
             jy = self.height * 0.15
             self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
@@ -477,10 +485,10 @@ class GameWidget(Widget):
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
-            Color(*C_BG); Rectangle(pos=(0, 0), size=(SCREEN_W, SCREEN_H))
+            Color(*C_BG); Rectangle(pos=(0, 0), size=(self.width, self.height))
             
-            ox = self.snake.head[0] - SCREEN_W / 2
-            oy = self.snake.head[1] - SCREEN_H / 2
+            ox = self.snake.head[0] - self.width / 2
+            oy = self.snake.head[1] - self.height / 2
             def screen(x, y): return x - ox, y - oy
 
             for st in self.stations:
@@ -515,12 +523,24 @@ class GameWidget(Widget):
                 Color(*MOD_COLORS[m.mtype]); Rectangle(pos=(mx-CELL*0.3, my-CELL*0.3), size=(CELL*0.6, CELL*0.6))
                 Color(*C_RED); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48, 8))
                 Color(*C_GREEN); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48*max(0,min(1,m.hp/m.max_hp)), 8))
+                
+                # Отрисовка щитов и топоров
+                if m.mtype == MOD_SHIELD:
+                    for k in range(2):
+                        a = m.phase*3.0 + k*math.pi
+                        shx, shy = mx + math.cos(a) * 45, my + math.sin(a) * 45
+                        Color(*C_SHIELD); Line(circle=(shx, shy, 20), width=6)
+                if m.mtype == MOD_AXES:
+                    for k in range(2):
+                        a = m.phase*3.0 + k*math.pi
+                        ax, ay = mx + math.cos(a) * 55, my + math.sin(a) * 55
+                        Color(*C_AXES); Ellipse(pos=(ax-15, ay-15), size=(30, 30))
             
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            # Джойстик (привязан к self.width)
-            jx = self.width * 0.85
+            # Джойстик (0.82)
+            jx = self.width * 0.82
             jy = self.height * 0.15
             r = min(self.width, self.height) * 0.14
             Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
@@ -618,7 +638,8 @@ class SnakeApp(App):
         return self.root
 
     def start_game(self, instance):
-        self.root.remove_widget(self.menu)
+        if self.menu in self.root.children:
+            self.root.remove_widget(self.menu)
         
         self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
         self.root.add_widget(self.game)
@@ -629,6 +650,13 @@ class SnakeApp(App):
         self.hud.bind(size=self.hud.setter('text_size'))
         self.root.add_widget(self.hud)
         
+        # НОВЫЙ ЛЕЙБЛ ДЛЯ СПИСКА МОДУЛЕЙ (справа)
+        self.module_list = Label(text="", 
+                         pos_hint={'right': 0.99, 'top': 0.99}, size_hint=(0.4, 0.3),
+                         color=(0.8, 0.8, 0.8, 1), font_size='24sp', bold=True, halign='right')
+        self.module_list.bind(size=self.module_list.setter('text_size'))
+        self.root.add_widget(self.module_list)
+        
         self.notify_label = Label(text="", 
                          pos_hint={'x': 0.01, 'top': 0.85}, size_hint=(0.5, 0.1),
                          color=(1, 0.8, 0.3, 1), font_size='36sp', bold=True, halign='left')
@@ -637,13 +665,31 @@ class SnakeApp(App):
         
         Clock.schedule_interval(self.update_hud, 0.1)
 
+    def go_to_menu(self):
+        if hasattr(self, 'game'):
+            self.root.remove_widget(self.game)
+        if hasattr(self, 'hud'):
+            self.root.remove_widget(self.hud)
+        if hasattr(self, 'module_list'):
+            self.root.remove_widget(self.module_list)
+        if hasattr(self, 'notify_label'):
+            self.root.remove_widget(self.notify_label)
+            
+        self.menu = MainMenu(start_callback=self.start_game, exit_callback=self.stop)
+        self.root.add_widget(self.menu)
+
     def update_hud(self, dt):
         g = getattr(self, 'game', None)
         if not g: return
         s = g.snake
         text = f"HP: {int(s.head_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
-        if g.game_over: text += "\nИГРА ОКОНЧЕНА"
         self.hud.text = text
+        
+        # Обновляем список модулей справа
+        mod_text = "Модули:\n"
+        for i, m in enumerate(s.modules):
+            mod_text += f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}\n"
+        self.module_list.text = mod_text
         
         if g.message_timer > 0:
             self.notify_label.text = g.message
