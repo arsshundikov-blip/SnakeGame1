@@ -9,6 +9,7 @@ from kivy.uix.label import Label
 from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Rectangle, Line
 from kivy.core.text import Label as CoreLabel
+from kivy.metrics import dp, sp  # <--- ДОБАВЛЕНО ДЛЯ АДАПТИВНОСТИ
 import math
 import random
 import os
@@ -155,6 +156,7 @@ class GameWidget(Widget):
         self.pickup_timer, self.station_timer = 6.0, 25.0
         self.paused, self.game_over = False, False
         self.show_upgrade, self.upgrade_options = False, []
+
         self.message, self.message_timer = "", 0.0
         self.station_menu = False
         self.station_ref = None
@@ -172,16 +174,14 @@ class GameWidget(Widget):
             self.add_widget(btn)
 
         self.pause_button = Button(text="II", size_hint=(None, None),
-                                   size=(100, 100),
-                                   background_color=(0.3, 0.3, 0.3, 0.5),
-                                   font_size='30sp')
+                                   background_color=(0.3, 0.3, 0.3, 0.7),
+                                   font_size=sp(20))
         self.pause_button.bind(on_press=self.toggle_pause)
         self.add_widget(self.pause_button)
 
         self.save_button = Button(text="SAVE", size_hint=(None, None),
-                                  size=(100, 100),
                                   background_color=(0.2, 0.5, 0.2, 0.7),
-                                  font_size='18sp')
+                                  font_size=sp(14))
         self.save_button.bind(on_press=self._on_save_pressed)
         self.add_widget(self.save_button)
 
@@ -191,12 +191,16 @@ class GameWidget(Widget):
     def _layout_static_widgets(self, *args):
         if not self.width or not self.height:
             return
-        size = min(self.width, self.height) * 0.08
-        margin = self.height * 0.02
-        self.pause_button.size = (size, size)
-        self.pause_button.pos = (self.width * 0.02, self.height - size - margin)
-        self.save_button.size = (size, size)
-        self.save_button.pos = (self.width * 0.02 + size + 10, self.height - size - margin)
+        # Делаем кнопки фиксированного размера в dp, чтобы они не были огромными
+        btn_size = dp(50) 
+        margin = dp(10)
+        
+        # Кнопки в левом верхнем углу, с отступом от края экрана (чтобы не залезть под статус-бар)
+        self.pause_button.size = (btn_size, btn_size)
+        self.pause_button.pos = (margin, self.height - btn_size - margin)
+        
+        self.save_button.size = (btn_size * 1.5, btn_size)
+        self.save_button.pos = (margin + btn_size + dp(10), self.height - btn_size - margin)
 
     def toggle_pause(self, instance):
         if not self.game_over:
@@ -780,21 +784,26 @@ class SnakeApp(App):
             self.root.remove_widget(self.menu)
 
     def _build_hud(self):
+        # HUD: всё смещено вправо. Шрифт уменьшен.
+        
+        # 1. Основная инфа (HP, Lvl, Wave, $)
         self.hud = Label(text="",
-                         pos_hint={'x': 0.01, 'top': 0.99}, size_hint=(0.5, 0.1),
-                         color=(1, 1, 1, 1), font_size='40sp', bold=True, halign='left')
+                         pos_hint={'right': 0.98, 'top': 0.98}, size_hint=(0.4, 0.1),
+                         color=(1, 1, 1, 1), font_size=sp(16), bold=True, halign='right', valign='top')
         self.hud.bind(size=self.hud.setter('text_size'))
         self.root.add_widget(self.hud)
 
+        # 2. Список модулей (справа, ниже HUD)
         self.module_list = Label(text="",
-                                 pos_hint={'right': 0.99, 'top': 0.99}, size_hint=(0.4, 0.3),
-                                 color=(0.8, 0.8, 0.8, 1), font_size='24sp', bold=True, halign='right')
+                                 pos_hint={'right': 0.98, 'top': 0.85}, size_hint=(0.4, 0.4),
+                                 color=(0.8, 0.8, 0.8, 1), font_size=sp(12), bold=True, halign='right', valign='top')
         self.module_list.bind(size=self.module_list.setter('text_size'))
         self.root.add_widget(self.module_list)
 
+        # 3. Уведомления (по центру сверху, чтобы не мешать)
         self.notify_label = Label(text="",
-                                  pos_hint={'x': 0.01, 'top': 0.85}, size_hint=(0.5, 0.1),
-                                  color=(1, 0.8, 0.3, 1), font_size='36sp', bold=True, halign='left')
+                                  pos_hint={'center_x': 0.5, 'top': 0.9}, size_hint=(0.6, 0.1),
+                                  color=(1, 0.8, 0.3, 1), font_size=sp(18), bold=True, halign='center')
         self.notify_label.bind(size=self.notify_label.setter('text_size'))
         self.root.add_widget(self.notify_label)
 
@@ -840,9 +849,13 @@ class SnakeApp(App):
         g = getattr(self, 'game', None)
         if not g: return
         s = g.snake
-        text = f"HP: {int(s.head_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
+        
+        # Кратко: HP | Lvl
+        # Wave | $
+        text = f"HP: {int(s.head_hp)}  |  Lvl: {s.level}\nWave: {g.wave}  |  $: {s.money}"
         self.hud.text = text
 
+        # Модули (сокращаем, чтобы влезло)
         mod_text = "Модули:\n"
         for i, m in enumerate(s.modules):
             mod_text += f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}\n"
