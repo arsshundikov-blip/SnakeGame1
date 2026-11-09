@@ -1,8 +1,5 @@
-import kivy
-kivy.require('2.0.0')
-
 from kivy.config import Config
-# ВАЖНО: убрали фиксированные width/height — на телефоне окно своё
+# Только multisamples — никаких фиксированных width/height!
 Config.set('graphics', 'multisamples', '0')
 
 from kivy.app import App
@@ -12,14 +9,14 @@ from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.clock import Clock
 from kivy.graphics import Color, Ellipse, Rectangle, Line
-from kivy.core.window import Window
 from kivy.core.text import Label as CoreLabel
 import math
 import random
 import os
 import json
 
-Window.fullscreen = 'auto'
+# ВАЖНО: Window.fullscreen НЕ ставим — в buildozer.spec стоит fullscreen = 0.
+# Если поставить 'auto', получим конфликт (игра уйдёт под системные панели криво).
 
 # ---------- Константы (только игровые, без размеров экрана) ----------
 CELL = 24
@@ -58,7 +55,8 @@ GUN_STATS = {MOD_PISTOL: (12, 340, 0.55), MOD_RIFLE: (6, 300, 0.13), MOD_SNIPER:
 # ---------- Путь к сохранению (работает и на ПК, и на Android) ----------
 def get_save_path():
     app = App.get_running_app()
-    # user_data_dir на Android = песочница приложения, на ПК = ~/.<appname>
+    # На Android user_data_dir = /data/data/org.shipit.snakegame1/files
+    # На ПК = ~/.snakegame1
     base = app.user_data_dir if app else os.path.expanduser("~")
     try:
         os.makedirs(base, exist_ok=True)
@@ -169,7 +167,6 @@ class GameWidget(Widget):
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
 
-        # Невидимые кнопки-зоны для меню. Позиции обновляются при каждом открытии меню.
         self.menu_btns = []
         for i in range(4):
             btn = Button(text="", size_hint=(None, None), size=(10, 10),
@@ -178,7 +175,6 @@ class GameWidget(Widget):
             self.menu_btns.append(btn)
             self.add_widget(btn)
 
-        # Плавающая кнопка паузы
         self.pause_button = Button(text="II", size_hint=(None, None),
                                    size=(100, 100),
                                    background_color=(0.3, 0.3, 0.3, 0.5),
@@ -186,7 +182,6 @@ class GameWidget(Widget):
         self.pause_button.bind(on_press=self.toggle_pause)
         self.add_widget(self.pause_button)
 
-        # Кнопка «Сохранить»
         self.save_button = Button(text="SAVE", size_hint=(None, None),
                                   size=(100, 100),
                                   background_color=(0.2, 0.5, 0.2, 0.7),
@@ -198,15 +193,12 @@ class GameWidget(Widget):
         self._layout_static_widgets()
 
     def _layout_static_widgets(self, *args):
-        # Кнопки паузы и сохранения — в левом верхнем углу, от реального размера виджета
         if not self.width or not self.height:
             return
         size = min(self.width, self.height) * 0.08
         margin = self.height * 0.02
-        # Пауза
         self.pause_button.size = (size, size)
         self.pause_button.pos = (self.width * 0.02, self.height - size - margin)
-        # Сохранить — справа от паузы
         self.save_button.size = (size, size)
         self.save_button.pos = (self.width * 0.02 + size + 10, self.height - size - margin)
 
@@ -318,13 +310,11 @@ class GameWidget(Widget):
             return
 
         if self.show_upgrade or self.station_menu or self.reorder_mode or self.paused:
-            # Скрываем статические кнопки в меню
             self.pause_button.opacity = 0
             self.save_button.opacity = 0
             self.redraw()
             return
 
-        # В обычном режиме — показываем
         self.pause_button.opacity = 1
         self.save_button.opacity = 1
 
@@ -553,9 +543,7 @@ class GameWidget(Widget):
         self.reorder_mode = False
         for btn in self.menu_btns: btn.opacity = 0
 
-    # ---------- Раскладка невидимых кнопок в координатах виджета ----------
     def _layout_menu_buttons(self, count, top_offset=0.55, from_top=False):
-        """Размещает невидимые кнопки поверх нарисованных прямоугольников меню."""
         btn_w = self.width * 0.7
         btn_h = self.height * 0.09
         x = (self.width - btn_w) / 2
@@ -576,7 +564,6 @@ class GameWidget(Widget):
         if self.show_upgrade or self.station_menu or self.reorder_mode:
             return super().on_touch_down(touch)
 
-        # Джойстик в правом нижнем углу — от реального размера виджета
         jx = self.width * 0.82
         jy = self.height * 0.15
         r = min(self.width, self.height) * 0.14
@@ -657,7 +644,6 @@ class GameWidget(Widget):
             hx, hy = screen(s.head[0], s.head[1])
             Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
-            # Джойстик — в координатах виджета
             jx = self.width * 0.82
             jy = self.height * 0.15
             r = min(self.width, self.height) * 0.14
@@ -667,7 +653,6 @@ class GameWidget(Widget):
             knob_y = jy + s.dir[1] * (r * 0.5)
             Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 40, knob_y - 40), size=(80, 80))
 
-            # Меню — те же координаты, что и у невидимых кнопок
             if self.show_upgrade:
                 Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
                 lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=int(min(self.width, self.height)*0.04),
@@ -874,7 +859,6 @@ class SnakeApp(App):
             self.notify_label.text = ""
 
     def on_stop(self):
-        # Автосохранение при выходе
         if hasattr(self, 'game') and self.game and not self.game.game_over:
             self.game.save_game()
 
