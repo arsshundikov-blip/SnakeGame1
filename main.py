@@ -1,5 +1,4 @@
 from kivy.config import Config
-# Только multisamples — никаких фиксированных width/height!
 Config.set('graphics', 'multisamples', '0')
 
 from kivy.app import App
@@ -15,10 +14,7 @@ import random
 import os
 import json
 
-# ВАЖНО: Window.fullscreen НЕ ставим — в buildozer.spec стоит fullscreen = 0.
-# Если поставить 'auto', получим конфликт (игра уйдёт под системные панели криво).
-
-# ---------- Константы (только игровые, без размеров экрана) ----------
+# ---------- Константы ----------
 CELL = 24
 SNAKE_SPEED_BASE = 6.0
 SNAKE_SPEED_PER_BOOST = 0.25
@@ -52,11 +48,8 @@ MOD_COLORS = {MOD_PISTOL: (0.39, 0.78, 1.0), MOD_RIFLE: (0.39, 1.0, 0.78), MOD_S
 GUN_STATS = {MOD_PISTOL: (12, 340, 0.55), MOD_RIFLE: (6, 300, 0.13), MOD_SNIPER: (40, 620, 1.4)}
 
 
-# ---------- Путь к сохранению (работает и на ПК, и на Android) ----------
 def get_save_path():
     app = App.get_running_app()
-    # На Android user_data_dir = /data/data/org.shipit.snakegame1/files
-    # На ПК = ~/.snakegame1
     base = app.user_data_dir if app else os.path.expanduser("~")
     try:
         os.makedirs(base, exist_ok=True)
@@ -65,7 +58,6 @@ def get_save_path():
     return os.path.join(base, "save.json")
 
 
-# ---------- Классы игры ----------
 class Module:
     def __init__(self, mtype):
         self.mtype = mtype
@@ -76,6 +68,7 @@ class Module:
         self.phase = 0.0
     def is_gun(self): return self.mtype in GUN_STATS
 
+
 class Enemy:
     def __init__(self, x, y, hp, speed, radius, damage, color, xp, money, kind="normal"):
         self.x, self.y = x, y
@@ -84,16 +77,20 @@ class Enemy:
         self.color, self.reward_xp, self.reward_money, self.kind = color, xp, money, kind
         self.shoot_cd = 1.5
 
+
 class Bullet:
     def __init__(self, x, y, vx, vy, dmg, life=1.2, radius=4, enemy=False):
         self.x, self.y, self.vx, self.vy, self.damage = x, y, vx, vy, dmg
         self.life, self.radius, self.enemy = life, radius, enemy
 
+
 class Pickup:
     def __init__(self, x, y, mtype): self.x, self.y, self.mtype, self.radius = x, y, mtype, 16
 
+
 class Station:
     def __init__(self, x, y): self.x, self.y, self.radius, self.used = x, y, 26, False
+
 
 class Snake:
     def __init__(self):
@@ -158,7 +155,6 @@ class GameWidget(Widget):
         self.pickup_timer, self.station_timer = 6.0, 25.0
         self.paused, self.game_over = False, False
         self.show_upgrade, self.upgrade_options = False, []
-
         self.message, self.message_timer = "", 0.0
         self.station_menu = False
         self.station_ref = None
@@ -231,7 +227,6 @@ class GameWidget(Widget):
 
     def msg(self, t, dur=2.0): self.message, self.message_timer = t, dur
 
-    # ---------- СОХРАНЕНИЕ / ЗАГРУЗКА ----------
     def to_dict(self):
         s = self.snake
         return {
