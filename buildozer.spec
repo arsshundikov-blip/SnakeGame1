@@ -1,5 +1,4 @@
 [app]
-
 title = Snakegame1
 package.name = snakegame1
 package.domain = org.shipit
@@ -11,8 +10,11 @@ source.exclude_dirs = tests, bin, venv, .venv, .git, .github, dist, build, __pyc
 
 version = 0.1.0
 
-# УБРАЛИ ВЕРСИЮ У pyjnius и оставили только arm64-v8a
-requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,openssl,sqlite3,pyjnius,setuptools,certifi,charset-normalizer,idna,urllib3,requests
+# pyjnius УБРАН. Cython зафиксирован под Kivy 2.3.1
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.1,cython==3.0.11,openssl,sqlite3,setuptools,certifi,charset-normalizer,idna,urllib3,requests
+
+# Обязательно для Kivy 2.3.1 + NDK 25b
+p4a.branch = develop
 
 orientation = landscape
 fullscreen = 0
@@ -21,8 +23,6 @@ android.api = 33
 android.minapi = 24
 android.ndk = 25b
 android.accept_sdk_license = True
-
-# ОСТАВИЛИ ТОЛЬКО СОВРЕМЕННУЮ АРХИТЕКТУРУ
 android.archs = arm64-v8a
 android.logcat_filters = *:S python:D
 
