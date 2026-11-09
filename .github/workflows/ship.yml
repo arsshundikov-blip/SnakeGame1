@@ -6,10 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  # ГЛАВНЫЙ ФИКС: запрещаем python-for-android обновлять pip внутри venv
   P4A_BUILD_MODE: debug
   P4A_DO_NOT_UPDATE_PIP: "1"
   PIP_DISABLE_PIP_VERSION_CHECK: 1
+  # Принудительно Node 24 для всех экшенов (убирает предупреждения)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -17,10 +18,10 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6   # Node 24
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6   # Node 24
         with:
           python-version: '3.11'
 
@@ -35,7 +36,7 @@ jobs:
       - name: Install Buildozer and Cython
         run: |
           pip install --upgrade pip
-          pip install buildozer==1.5.0 cython==0.29.36 virtualenv
+          pip install buildozer==1.5.0 cython==3.0.11 virtualenv
 
       - name: Build APK with Buildozer
         run: |
@@ -43,14 +44,14 @@ jobs:
           buildozer -v android debug 2>&1 | tee build.log
 
       - name: Upload Build Log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7   # Node 24
         if: always()
         with:
           name: build-log
           path: build.log
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7   # Node 24
         with:
           name: apk
           path: bin/*.apk
