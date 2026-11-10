@@ -7,111 +7,208 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Rectangle, Line
+from kivy.graphics import Color, Ellipse, Rectangle, Line, Triangle
 from kivy.core.text import Label as CoreLabel
-from kivy.metrics import dp, sp  # <--- ДОБАВЛЕНО ДЛЯ АДАПТИВНОСТИ
+from kivy.metrics import dp, sp
 import math
 import random
 import os
 import json
+from enum import Enum, auto
+
+# ---------- Пути для сохранений ----------
+def get_save_path():
+    app = App.get_running_app()
+    base = app.user_data_dir if app else os.path.expanduser("~")
+    try: os.makedirs(base, exist_ok=True)
+    except Exception: base = os.path.expanduser("~")
+    return os.path.join(base, "save.json")
+
+SAVE_FILE = get_save_path()
 
 # ---------- Константы ----------
-CELL = 24
+CELL = 28
 SNAKE_SPEED_BASE = 6.0
 SNAKE_SPEED_PER_BOOST = 0.25
 MAX_BOOSTERS = 10
 MAX_HEALS = 10
 HEAD_MAX_HP = 100
 
-C_BG = (0.05, 0.06, 0.09)
-C_HEAD = (0.55, 1.0, 0.7)
-C_BODY = (0.23, 0.67, 0.39)
-C_ENEMY = (0.9, 0.31, 0.31)
-C_ENEMY_FAST = (1.0, 0.55, 0.23)
-C_ENEMY_TANK = (0.63, 0.23, 0.78)
-C_ENEMY_SHOOTER = (1.0, 0.31, 0.78)
-C_BULLET = (1.0, 0.94, 0.47)
-C_ENEMY_BULLET = (1.0, 0.39, 0.39)
-C_STATION = (1.0, 0.78, 0.23)
-C_RED = (0.6, 0, 0)
-C_GREEN = (0, 0.86, 0.24)
-C_SHIELD = (1.0, 0.86, 0.39)
-C_AXES = (1.0, 0.39, 0.39)
+COLOR_BG = (14/255, 16/255, 24/255)
+COLOR_HEAD = (140/255, 255/255, 180/255)
+COLOR_HEAD_GLOW = (60/255, 200/255, 120/255)
+COLOR_BODY = (60/255, 170/255, 100/255)
+COLOR_BODY_DARK = (40/255, 120/255, 70/255)
+COLOR_ENEMY = (230/255, 80/255, 80/255)
+COLOR_ENEMY_FAST = (255/255, 140/255, 60/255)
+COLOR_ENEMY_TANK = (160/255, 60/255, 200/255)
+COLOR_ENEMY_SHOOTER = (255/255, 80/255, 200/255)
+COLOR_ENEMY_BULLET = (255/255, 100/255, 100/255)
+COLOR_BULLET = (255/255, 240/255, 120/255)
+COLOR_STATION = (255/255, 200/255, 60/255)
+COLOR_TEXT = (230/255, 230/255, 230/255)
+COLOR_GOLD = (255/255, 210/255, 80/255)
 
-MOD_PISTOL, MOD_RIFLE, MOD_SNIPER = "Pistol", "Rifle", "Sniper"
-MOD_SHIELD, MOD_HEAL, MOD_BOOSTER, MOD_AXES = "Shield", "Heal", "Booster", "Axes"
+RARITY_COLORS = {
+    1: (200/255, 200/255, 200/255), 2: (100/255, 200/255, 255/255), 3: (180/255, 100/255, 255/255),
+    4: (255/255, 100/255, 200/255), 5: (255/255, 200/255, 50/255)
+}
+RARITY_NAMES = {1: "Обычная", 2: "Редкая", 3: "Сверхредкая", 4: "Эпическая", 5: "Легендарная"}
 
-MOD_NAMES = {MOD_PISTOL: "Пистолет", MOD_RIFLE: "Автомат", MOD_SNIPER: "Снайперка",
-             MOD_SHIELD: "Щит", MOD_HEAL: "Хилка", MOD_BOOSTER: "Ускоритель", MOD_AXES: "Топоры"}
-MOD_BASE_HP = {MOD_PISTOL: 40, MOD_RIFLE: 35, MOD_SNIPER: 45, MOD_SHIELD: 60, MOD_HEAL: 25, MOD_BOOSTER: 25, MOD_AXES: 80}
-MOD_COLORS = {MOD_PISTOL: (0.39, 0.78, 1.0), MOD_RIFLE: (0.39, 1.0, 0.78), MOD_SNIPER: (0.78, 0.47, 1.0),
-              MOD_SHIELD: (1.0, 0.86, 0.39), MOD_HEAL: (0.39, 1.0, 0.47), MOD_BOOSTER: (1.0, 0.55, 1.0), MOD_AXES: (1.0, 0.39, 0.39)}
-GUN_STATS = {MOD_PISTOL: (12, 340, 0.55), MOD_RIFLE: (6, 300, 0.13), MOD_SNIPER: (40, 620, 1.4)}
+UNLOCKED_ENEMIES = set()
+UNLOCKED_MODULES = set()
 
+# ---------- Данные ----------
+class ModType(Enum):
+    PISTOL = auto(); RIFLE = auto(); SNIPER = auto()
+    SHIELD = auto(); HEAL = auto(); BOOSTER = auto(); AXES = auto()
+    TESLA = auto(); GRENADE = auto(); DRONE = auto()
 
-def get_save_path():
-    app = App.get_running_app()
-    base = app.user_data_dir if app else os.path.expanduser("~")
-    try:
-        os.makedirs(base, exist_ok=True)
-    except Exception:
-        base = os.path.expanduser("~")
-    return os.path.join(base, "save.json")
+MOD_DATA = {
+    ModType.PISTOL:  {"name": "Пистолет", "hp": 40, "color": (100/255, 200/255, 255/255), "rarity": 1},
+    ModType.RIFLE:   {"name": "Автомат", "hp": 35, "color": (100/255, 255/255, 200/255), "rarity": 2},
+    ModType.SNIPER:  {"name": "Снайперка", "hp": 45, "color": (200/255, 120/255, 255/255), "rarity": 3},
+    ModType.SHIELD:  {"name": "Щит", "hp": 60, "color": (255/255, 220/255, 100/255), "rarity": 3},
+    ModType.HEAL:    {"name": "Хилка", "hp": 25, "color": (100/255, 255/255, 120/255), "rarity": 4},
+    ModType.BOOSTER: {"name": "Ускоритель", "hp": 25, "color": (255/255, 140/255, 255/255), "rarity": 4},
+    ModType.AXES:    {"name": "Два топора", "hp": 80, "color": (255/255, 255/255, 255/255), "rarity": 5},
+    ModType.TESLA:   {"name": "Тесла", "hp": 30, "color": (150/255, 255/255, 255/255), "rarity": 3},
+    ModType.GRENADE: {"name": "Гранатомет", "hp": 40, "color": (200/255, 100/255, 50/255), "rarity": 4},
+    ModType.DRONE:   {"name": "Дрон", "hp": 50, "color": (180/255, 180/255, 180/255), "rarity": 5},
+}
 
+GUN_STATS = {
+    ModType.PISTOL: (12, 340, 0.55), ModType.RIFLE: (6, 300, 0.13), ModType.SNIPER: (40, 620, 1.4),
+    ModType.TESLA: (15, 250, 0.8), ModType.GRENADE: (30, 400, 1.2), ModType.DRONE: (8, 300, 0.4)
+}
 
+# ---------- Сохранения ----------
+class PlayerData:
+    def __init__(self):
+        self.money = 0
+        self.snake_skin = 0
+        self.gun_skin = 0
+        self.owned_snake_skins = [0]
+        self.owned_gun_skins = [0]
+        self.upg_legs = False
+        self.upg_skin = False
+        self.upg_start_heal = False
+        self.high_score = 0
+        self.load()
+
+    def load(self):
+        global UNLOCKED_ENEMIES, UNLOCKED_MODULES
+        if os.path.exists(SAVE_FILE):
+            try:
+                with open(SAVE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    UNLOCKED_ENEMIES = set(data.get("enemies", []))
+                    mods = data.get("modules", [])
+                    for m_name in mods:
+                        for m_enum in ModType:
+                            if m_enum.name == m_name: UNLOCKED_MODULES.add(m_enum)
+                    self.money = data.get("money", 0)
+                    self.snake_skin = data.get("snake_skin", 0)
+                    self.gun_skin = data.get("gun_skin", 0)
+                    self.owned_snake_skins = data.get("owned_snake_skins", [0])
+                    self.owned_gun_skins = data.get("owned_gun_skins", [0])
+                    self.upg_legs = data.get("upg_legs", False)
+                    self.upg_skin = data.get("upg_skin", False)
+                    self.upg_start_heal = data.get("upg_start_heal", False)
+                    self.high_score = data.get("high_score", 0)
+            except Exception as e:
+                print(f"Ошибка загрузки: {e}")
+
+    def save(self):
+        data = {
+            "enemies": list(UNLOCKED_ENEMIES),
+            "modules": [m.name for m in UNLOCKED_MODULES],
+            "money": self.money,
+            "snake_skin": self.snake_skin,
+            "gun_skin": self.gun_skin,
+            "owned_snake_skins": self.owned_snake_skins,
+            "owned_gun_skins": self.owned_gun_skins,
+            "upg_legs": self.upg_legs,
+            "upg_skin": self.upg_skin,
+            "upg_start_heal": self.upg_start_heal,
+            "high_score": self.high_score
+        }
+        try:
+            with open(SAVE_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Ошибка сохранения: {e}")
+
+    def reset_progress(self):
+        self.money = 0
+        self.snake_skin = 0
+        self.gun_skin = 0
+        self.owned_snake_skins = [0]
+        self.owned_gun_skins = [0]
+        self.upg_legs = False
+        self.upg_skin = False
+        self.upg_start_heal = False
+        self.high_score = 0
+        UNLOCKED_ENEMIES.clear()
+        UNLOCKED_MODULES.clear()
+        self.save()
+
+PLAYER = PlayerData()
+
+# ---------- Игровые классы ----------
 class Module:
     def __init__(self, mtype):
         self.mtype = mtype
-        self.hp = MOD_BASE_HP[mtype]
+        self.hp = MOD_DATA[mtype]["hp"]
         self.max_hp = self.hp
         self.level = 1
         self.cooldown = 0.0
         self.phase = 0.0
     def is_gun(self): return self.mtype in GUN_STATS
 
-
 class Enemy:
-    def __init__(self, x, y, hp, speed, radius, damage, color, xp, money, kind="normal"):
+    def __init__(self, x, y, hp, speed, radius, damage, color, xp, money, kind, shoot_cd=0):
         self.x, self.y = x, y
         self.hp, self.max_hp = hp, hp
         self.speed, self.radius, self.damage = speed, radius, damage
         self.color, self.reward_xp, self.reward_money, self.kind = color, xp, money, kind
-        self.shoot_cd = 1.5
-
+        self.shoot_cd = shoot_cd
 
 class Bullet:
-    def __init__(self, x, y, vx, vy, dmg, life=1.2, radius=4, enemy=False):
+    def __init__(self, x, y, vx, vy, dmg, life=1.2, radius=4, enemy=False, is_grenade=False):
         self.x, self.y, self.vx, self.vy, self.damage = x, y, vx, vy, dmg
-        self.life, self.radius, self.enemy = life, radius, enemy
-
+        self.life, self.radius, self.enemy, self.is_grenade = life, radius, enemy, is_grenade
 
 class Pickup:
     def __init__(self, x, y, mtype): self.x, self.y, self.mtype, self.radius = x, y, mtype, 16
 
-
 class Station:
     def __init__(self, x, y): self.x, self.y, self.radius, self.used = x, y, 26, False
 
+class Explosion:
+    def __init__(self, x, y, radius): self.x, self.y, self.radius, self.life = x, y, radius, 0.5
 
 class Snake:
     def __init__(self):
         self.head = [0.0, 0.0]
         self.dir = [1.0, 0.0]
-        self.speed = SNAKE_SPEED_BASE * CELL
-        self.head_hp = HEAD_MAX_HP
-        self.head_max_hp = HEAD_MAX_HP
+        self.speed = SNAKE_SPEED_BASE * CELL * (1.05 if PLAYER.upg_legs else 1.0)
+        hp = HEAD_MAX_HP + (20 if PLAYER.upg_skin else 0)
+        self.head_hp, self.head_max_hp = hp, hp
         self.body = []
-        self.body_size = 3
+        self.body_size = 1
         self.modules = []
         self.lost_modules = []
         self.had_modules = False
         self.money, self.xp, self.level, self.xp_to_next = 0, 0, 1, 10
         self.boosters, self.heals = 0, 0
-        self.alive = True
+        self.drone_pos = [0.0, 0.0]
         self._init_body()
-        self.add_module(MOD_PISTOL)
+        self.add_module(ModType.PISTOL)
+        if PLAYER.upg_start_heal: self.add_module(ModType.HEAL)
 
     def _init_body(self):
+        self.body.clear()
         for i in range(1, self.body_size + 1):
             self.body.append([self.head[0] - self.dir[0]*CELL*i, self.head[1] - self.dir[1]*CELL*i])
 
@@ -126,16 +223,23 @@ class Snake:
         self.body_size = len(self.body)
 
     def module_positions(self):
-        return [self.body[i] if i < len(self.body) else (self.body[-1] if self.body else self.head) for i in range(len(self.modules))]
+        res = []
+        for i in range(len(self.modules)):
+            if i < len(self.body): res.append(self.body[i])
+            elif self.body: res.append(self.body[-1])
+            else: res.append(self.head)
+        return res
 
     def add_module(self, mtype):
-        if mtype == MOD_BOOSTER and self.boosters >= MAX_BOOSTERS: return False
-        if mtype == MOD_HEAL and self.heals >= MAX_HEALS: return False
+        if mtype == ModType.BOOSTER and self.boosters >= MAX_BOOSTERS: return False
+        if mtype == ModType.HEAL and self.heals >= MAX_HEALS: return False
         self.modules.append(Module(mtype))
-        if mtype == MOD_BOOSTER: self.boosters += 1
-        if mtype == MOD_HEAL: self.heals += 1
+        UNLOCKED_MODULES.add(mtype)
+        if mtype == ModType.BOOSTER: self.boosters += 1
+        if mtype == ModType.HEAL: self.heals += 1
         self.had_modules = True
-        self._grow_body()
+        if mtype == ModType.DRONE: self.drone_pos = list(self.head)
+        while len(self.body) < len(self.modules): self._grow_body()
         return True
 
     def damage_chain(self, idx):
@@ -143,183 +247,135 @@ class Snake:
         self.modules = self.modules[:idx]
         for m in removed:
             self.lost_modules.append(m.mtype)
-            if m.mtype == MOD_BOOSTER: self.boosters = max(0, self.boosters-1)
-            if m.mtype == MOD_HEAL: self.heals = max(0, self.heals-1)
+            if m.mtype == ModType.BOOSTER: self.boosters = max(0, self.boosters-1)
+            if m.mtype == ModType.HEAL: self.heals = max(0, self.heals-1)
 
-
+# ---------- Главный виджет игры ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.snake = None
-        self.enemies, self.bullets, self.pickups, self.stations = [], [], [], []
-        self.wave, self.wave_timer = 0, 2.0
-        self.pickup_timer, self.station_timer = 6.0, 25.0
-        self.paused, self.game_over = False, False
-        self.show_upgrade, self.upgrade_options = False, []
-
-        self.message, self.message_timer = "", 0.0
-        self.station_menu = False
-        self.station_ref = None
-        self.reorder_mode = False
-
         self.reset()
         Clock.schedule_interval(self.update, 1/60)
 
         self.menu_btns = []
         for i in range(4):
-            btn = Button(text="", size_hint=(None, None), size=(10, 10),
-                         pos=(0, 0), background_color=(0, 0, 0, 0), opacity=0)
+            btn = Button(text="", size_hint=(None, None), size=(10, 10), background_color=(0,0,0,0), opacity=0)
             btn.bind(on_press=lambda inst, idx=i: self.menu_action(idx))
             self.menu_btns.append(btn)
             self.add_widget(btn)
 
-        self.pause_button = Button(text="II", size_hint=(None, None),
-                                   background_color=(0.3, 0.3, 0.3, 0.7),
-                                   font_size=sp(20))
+        self.pause_button = Button(text="II", size_hint=(None, None), background_color=(0.3, 0.3, 0.3, 0.7), font_size=sp(20))
         self.pause_button.bind(on_press=self.toggle_pause)
         self.add_widget(self.pause_button)
-
-        self.save_button = Button(text="SAVE", size_hint=(None, None),
-                                  background_color=(0.2, 0.5, 0.2, 0.7),
-                                  font_size=sp(14))
-        self.save_button.bind(on_press=self._on_save_pressed)
-        self.add_widget(self.save_button)
 
         self.bind(size=self._layout_static_widgets, pos=self._layout_static_widgets)
         self._layout_static_widgets()
 
     def _layout_static_widgets(self, *args):
-        if not self.width or not self.height:
-            return
-        # Делаем кнопки фиксированного размера в dp, чтобы они не были огромными
-        btn_size = dp(50) 
+        if not self.width or not self.height: return
+        size = dp(50)
         margin = dp(10)
-        
-        # Кнопки в левом верхнем углу, с отступом от края экрана (чтобы не залезть под статус-бар)
-        self.pause_button.size = (btn_size, btn_size)
-        self.pause_button.pos = (margin, self.height - btn_size - margin)
-        
-        self.save_button.size = (btn_size * 1.5, btn_size)
-        self.save_button.pos = (margin + btn_size + dp(10), self.height - btn_size - margin)
-
-    def toggle_pause(self, instance):
-        if not self.game_over:
-            self.paused = not self.paused
-
-    def _on_save_pressed(self, instance):
-        if self.game_over:
-            return
-        self.save_game()
-
-    def menu_action(self, idx):
-        if self.show_upgrade:
-            self.apply_upgrade(idx)
-        elif self.station_menu:
-            if idx == 0: self.station_repair()
-            elif idx == 1: self.start_reorder()
-            elif idx == 2: self.station_heal()
-            elif idx == 3: self.close_station()
-        elif self.reorder_mode:
-            self.confirm_reorder(idx)
+        self.pause_button.size = (size, size)
+        self.pause_button.pos = (margin, self.height - size - margin)
 
     def reset(self):
         self.snake = Snake()
         self.enemies, self.bullets, self.pickups, self.stations = [], [], [], []
-        self.wave, self.wave_timer, self.pickup_timer, self.station_timer = 0, 2.0, 6.0, 25.0
+        self.lightning_lines, self.explosions = [], []
+        self.wave, self.wave_timer = 0, 2.0
+        self.pickup_timer, self.station_timer = 6.0, 25.0
         self.paused, self.game_over, self.show_upgrade = False, False, False
         self.station_menu, self.reorder_mode = False, False
+        self.upgrade_options = []
+        self.message, self.message_timer = "", 0.0
+        self.cam_x, self.cam_y = 0.0, 0.0
 
     def msg(self, t, dur=2.0): self.message, self.message_timer = t, dur
 
-    def to_dict(self):
+    def toggle_pause(self, instance):
+        if not self.game_over: self.paused = not self.paused
+
+    def menu_action(self, idx):
+        if self.show_upgrade: self.apply_upgrade(idx)
+        elif self.station_menu:
+            if idx == 0: self.station_repair()
+            elif idx == 1: self.station_menu = False; self.reorder_mode = True; self._layout_menu_buttons(min(6, len(self.snake.modules)), 0.85, True)
+            elif idx == 2: self.station_heal()
+            elif idx == 3: self.close_menu()
+        elif self.reorder_mode:
+            if idx < len(self.snake.modules) - 1:
+                mods = self.snake.modules; mods[idx], mods[idx+1] = mods[idx+1], mods[idx]
+
+    def close_menu(self):
+        self.station_menu = False; self.reorder_mode = False; self.show_upgrade = False
+        for btn in self.menu_btns: btn.opacity = 0
+
+    def open_upgrade(self):
+        self.show_upgrade = True
+        opts, existing = [], {m.mtype for m in self.snake.modules}
+        for t in existing: opts.append((f"Усилить: {MOD_DATA[t]['name']}", ('upgrade', t)))
+        pool = []
+        for m, data in MOD_DATA.items():
+            if m in existing: continue
+            if m == ModType.HEAL and self.snake.heals >= MAX_HEALS: continue
+            if m == ModType.BOOSTER and self.snake.boosters >= MAX_BOOSTERS: continue
+            weight = 1 if data["rarity"] == 5 else (3 if data["rarity"] == 4 else (5 if data["rarity"] == 3 else (10 if data["rarity"] == 2 else 20)))
+            pool.extend([m] * weight)
+        random.shuffle(pool)
+        for t in pool[:3]: opts.append((f"Новый: {MOD_DATA[t]['name']}", ('add', t)))
+        random.shuffle(opts); self.upgrade_options = opts[:3]
+        self._layout_menu_buttons(len(self.upgrade_options), 0.55)
+
+    def apply_upgrade(self, idx):
+        if 0 <= idx < len(self.upgrade_options):
+            _, (kind, t) = self.upgrade_options[idx]; s = self.snake
+            if kind == 'upgrade':
+                for m in s.modules:
+                    if m.mtype == t: m.level += 1; m.max_hp *= 1.2; m.hp = m.max_hp; break
+            else: s.add_module(t)
+        self.show_upgrade = False
+
+    def open_station(self, st):
+        self.station_menu, st.used = True, True
+        self._layout_menu_buttons(4, 0.62)
+
+    def station_repair(self):
         s = self.snake
-        return {
-            "snake": {
-                "head": list(s.head), "dir": list(s.dir),
-                "head_hp": s.head_hp, "head_max_hp": s.head_max_hp,
-                "body": [list(b) for b in s.body],
-                "body_size": s.body_size,
-                "modules": [{"mtype": m.mtype, "hp": m.hp, "max_hp": m.max_hp,
-                             "level": m.level, "cooldown": m.cooldown, "phase": m.phase}
-                            for m in s.modules],
-                "lost_modules": list(s.lost_modules),
-                "had_modules": s.had_modules,
-                "money": s.money, "xp": s.xp, "level": s.level,
-                "xp_to_next": s.xp_to_next,
-                "boosters": s.boosters, "heals": s.heals,
-            },
-            "wave": self.wave,
-            "wave_timer": self.wave_timer,
-            "pickup_timer": self.pickup_timer,
-            "station_timer": self.station_timer,
-        }
+        if not s.lost_modules: self.msg("Нет потерянных"); self.close_menu(); return
+        cost = len(s.lost_modules)*8
+        if s.money < cost: self.msg(f"Нужно {cost}$"); self.close_menu(); return
+        s.money -= cost
+        restored, s.lost_modules = s.lost_modules[:], []; cnt = 0
+        for t in restored:
+            if s.add_module(t): cnt += 1
+        self.msg(f"Восстановлено: {cnt}"); self.close_menu()
 
-    def load_from_dict(self, data):
-        try:
-            sd = data["snake"]
-            s = Snake()
-            s.head = list(sd["head"])
-            s.dir = list(sd["dir"])
-            s.head_hp = sd["head_hp"]
-            s.head_max_hp = sd["head_max_hp"]
-            s.body = [list(b) for b in sd["body"]]
-            s.body_size = sd["body_size"]
-            s.modules = []
-            for md in sd["modules"]:
-                m = Module(md["mtype"])
-                m.hp = md["hp"]; m.max_hp = md["max_hp"]
-                m.level = md["level"]; m.cooldown = md["cooldown"]; m.phase = md["phase"]
-                s.modules.append(m)
-            s.lost_modules = list(sd["lost_modules"])
-            s.had_modules = sd["had_modules"]
-            s.money = sd["money"]; s.xp = sd["xp"]; s.level = sd["level"]
-            s.xp_to_next = sd["xp_to_next"]
-            s.boosters = sd["boosters"]; s.heals = sd["heals"]
-            self.snake = s
-            self.wave = data.get("wave", 0)
-            self.wave_timer = data.get("wave_timer", 2.0)
-            self.pickup_timer = data.get("pickup_timer", 6.0)
-            self.station_timer = data.get("station_timer", 25.0)
-            self.enemies, self.bullets, self.pickups, self.stations = [], [], [], []
-            self.paused = False; self.game_over = False; self.show_upgrade = False
-            self.station_menu = False; self.reorder_mode = False
-            return True
-        except Exception as e:
-            print("LOAD ERROR:", e)
-            return False
+    def station_heal(self):
+        self.snake.head_hp = min(self.snake.head_max_hp, self.snake.head_hp + self.snake.head_max_hp*0.25)
+        self.msg("Хил 25%"); self.close_menu()
 
-    def save_game(self):
-        try:
-            path = get_save_path()
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False)
-            print("SAVED:", path)
-            self.msg("Сохранено")
-        except Exception as e:
-            print("SAVE ERROR:", e)
-            self.msg("Ошибка сохранения")
+    def _layout_menu_buttons(self, count, center_y_ratio=0.55, from_top=False):
+        btn_w = self.width * 0.8; btn_h = dp(50)
+        x = (self.width - btn_w) / 2
+        for i in range(4):
+            if i < count:
+                y = self.height * center_y_ratio - i * (btn_h + dp(10)) - btn_h/2 if not from_top else self.height * center_y_ratio - i * (btn_h + dp(10))
+                self.menu_btns[i].size = (btn_w, btn_h)
+                self.menu_btns[i].pos = (x, y)
+                self.menu_btns[i].opacity = 1
+            else: self.menu_btns[i].opacity = 0
 
     def update(self, dt):
-        if self.game_over:
-            if self.message_timer > 0:
-                self.message_timer -= dt
-            else:
-                App.get_running_app().go_to_menu()
+        if self.message_timer > 0: self.message_timer -= dt
+        if self.game_over or self.paused or self.show_upgrade or self.station_menu or self.reorder_mode:
             self.redraw()
             return
-
-        if self.show_upgrade or self.station_menu or self.reorder_mode or self.paused:
-            self.pause_button.opacity = 0
-            self.save_button.opacity = 0
-            self.redraw()
-            return
-
-        self.pause_button.opacity = 1
-        self.save_button.opacity = 1
 
         s = self.snake
-        s.head[0] += s.dir[0] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
-        s.head[1] += s.dir[1] * s.speed * (1 + SNAKE_SPEED_PER_BOOST*s.boosters) * dt
+        # Движение змеи
+        speed = s.speed * (1 + SNAKE_SPEED_PER_BOOST * s.boosters)
+        s.head[0] += s.dir[0] * speed * dt
+        s.head[1] += s.dir[1] * speed * dt
 
         target = s.head
         for i in range(len(s.body)):
@@ -328,60 +384,94 @@ class GameWidget(Widget):
             if d > CELL: s.body[i] = [target[0]-to[0]/d*CELL, target[1]-to[1]/d*CELL]
             target = s.body[i]
 
-        for m in s.modules:
-            m.cooldown = max(0, m.cooldown - dt)
-            m.phase += dt
+        # Оружие и модули
+        for m in s.modules: m.cooldown = max(0, m.cooldown-dt); m.phase += dt
 
         mpos = s.module_positions()
         for i, m in enumerate(s.modules):
             if not m.is_gun() or m.cooldown > 0: continue
-            pos = mpos[i]; best, target_e = None, None
+            pos = mpos[i]
+            
+            # Логика Дрона
+            if m.mtype == ModType.DRONE:
+                snake_len = len(s.body) * CELL
+                radius = max(50, snake_len / 2)
+                nearest_e, best_d = None, float('inf')
+                for e in self.enemies:
+                    d = (s.head[0]-e.x)**2 + (s.head[1]-e.y)**2
+                    if d < best_d: best_d, nearest_e = d, e
+                target_pos = [nearest_e.x, nearest_e.y] if nearest_e else s.head
+                dir_to = [target_pos[0]-s.drone_pos[0], target_pos[1]-s.drone_pos[1]]
+                dl = math.hypot(*dir_to)
+                if dl > 5: s.drone_pos = [s.drone_pos[0]+dir_to[0]/dl*400*dt, s.drone_pos[1]+dir_to[1]/dl*400*dt]
+                dist_from_head = [s.drone_pos[0]-s.head[0], s.drone_pos[1]-s.head[1]]
+                dl2 = math.hypot(*dist_from_head)
+                if dl2 > radius: s.drone_pos = [s.head[0]+dist_from_head[0]/dl2*radius, s.head[1]+dist_from_head[1]/dl2*radius]
+                pos = s.drone_pos
+
+            best, target_e = None, None
+            rng = GUN_STATS[m.mtype][1]
             for e in self.enemies:
                 d = (pos[0]-e.x)**2 + (pos[1]-e.y)**2
-                rng = GUN_STATS[m.mtype][1]
                 if d <= rng*rng and (best is None or d < best): best, target_e = d, e
+            
             if target_e:
-                dmg, rng, cd = GUN_STATS[m.mtype]
+                dmg, _, cd = GUN_STATS[m.mtype]
                 dmg *= 1 + 0.25*(m.level-1)
                 ang = math.atan2(target_e.y-pos[1], target_e.x-pos[0])
-                self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*900, math.sin(ang)*900, dmg))
+                if m.mtype == ModType.GRENADE:
+                    self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*600, math.sin(ang)*600, dmg, 1.5, 6, False, True))
+                elif m.mtype == ModType.TESLA:
+                    chain = [target_e]; cur = target_e
+                    for _ in range(3):
+                        bd, nt = 150**2, None
+                        for e in self.enemies:
+                            if e not in chain:
+                                d = (cur.x-e.x)**2 + (cur.y-e.y)**2
+                                if d < bd: bd, nt = d, e
+                        if nt: chain.append(nt); cur = nt
+                        else: break
+                    for ct in chain:
+                        ct.hp -= dmg
+                        self.lightning_lines.append((pos[0], pos[1], ct.x, ct.y, 0.1))
+                else:
+                    self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*900, math.sin(ang)*900, dmg))
                 m.cooldown = cd
 
-        for idx, m in enumerate(s.modules):
-            if m.mtype != MOD_HEAL or m.cooldown > 0: continue
-            m.cooldown = 1.5; heal = 0.5 + 0.3*m.level
-            if s.head_hp < s.head_max_hp: s.head_hp = min(s.head_max_hp, s.head_hp+heal)
-            mp = mpos[idx]
-            for j, other in enumerate(s.modules):
-                if other is m: continue
-                p = mpos[j]
-                if (mp[0]-p[0])**2 + (mp[1]-p[1])**2 <= (70+5*m.level)**2:
-                    other.hp = min(other.max_hp, other.hp+heal*0.4)
-
+        # Хилки
         for i, m in enumerate(s.modules):
-            if m.mtype != MOD_AXES: continue
-            mp = mpos[i]; orbit = 55 + 5*m.level
-            for k in range(2):
-                a = m.phase*3.0 + k*math.pi
-                ax, ay = mp[0]+math.cos(a)*orbit, mp[1]+math.sin(a)*orbit
-                for e in self.enemies:
-                    if (ax-e.x)**2 + (ay-e.y)**2 <= (e.radius+14)**2 and m.cooldown <= 0:
-                        e.hp -= 8 + 4*m.level
-                        dx, dy = e.x-ax, e.y-ay; dl = math.hypot(dx, dy) or 1
-                        e.x += dx/dl*18; e.y += dy/dl*18
-                        m.cooldown = 0.25
+            if m.mtype == ModType.HEAL and m.cooldown <= 0:
+                m.cooldown = 1.5; heal = 0.5 + 0.3*m.level
+                s.head_hp = min(s.head_max_hp, s.head_hp+heal)
+                mp = mpos[i]
+                for j, other in enumerate(s.modules):
+                    if other is m: continue
+                    p = mpos[j]
+                    if (mp[0]-p[0])**2 + (mp[1]-p[1])**2 <= (70+5*m.level)**2: other.hp = min(other.max_hp, other.hp+heal*0.4)
+        
+        # Топоры
+        for i, m in enumerate(s.modules):
+            if m.mtype == ModType.AXES:
+                mp = mpos[i]; orbit = 55 + 5*m.level
+                for k in range(2):
+                    a = m.phase*3.0 + k*math.pi
+                    ax, ay = mp[0]+math.cos(a)*orbit, mp[1]+math.sin(a)*orbit
+                    for e in self.enemies:
+                        if (ax-e.x)**2 + (ay-e.y)**2 <= (e.radius+14)**2 and m.cooldown <= 0:
+                            e.hp -= 8 + 4*m.level
+                            dx, dy = e.x-ax, e.y-ay; dl = math.hypot(dx, dy) or 1
+                            e.x += dx/dl*18; e.y += dy/dl*18
+                            m.cooldown = 0.25
 
+        # Урон модулям
         for i, m in enumerate(s.modules):
             p = mpos[i]
             for e in self.enemies:
-                if (p[0]-e.x)**2 + (p[1]-e.y)**2 <= (e.radius+12)**2:
-                    m.hp -= e.damage * dt * 0.8
-            if m.hp <= 0:
-                s.damage_chain(i)
-                if s.had_modules and not s.modules:
-                    self.game_over = True; self.msg("ИГРА ОКОНЧЕНА", 2.0); return
-                break
+                if (p[0]-e.x)**2 + (p[1]-e.y)**2 <= (e.radius+12)**2: m.hp -= e.damage*dt*0.8
+            if m.hp <= 0: s.damage_chain(i); break
+        if s.had_modules and not s.modules: self.game_over = True
 
+        # Враги
         for e in list(self.enemies):
             ang = math.atan2(s.head[1]-e.y, s.head[0]-e.x); d = math.hypot(s.head[0]-e.x, s.head[1]-e.y)
             if e.kind == "shooter" and d < 280: ang += math.pi
@@ -391,58 +481,87 @@ class GameWidget(Widget):
                 if e.shoot_cd <= 0 and d < 500:
                     e.shoot_cd = 2.0; a = math.atan2(s.head[1]-e.y, s.head[0]-e.x)
                     self.bullets.append(Bullet(e.x, e.y, math.cos(a)*350, math.sin(a)*350, e.damage, 2.0, 5, True))
-            if (e.x-s.head[0])**2 + (e.y-s.head[1])**2 <= (e.radius+CELL*0.6)**2:
-                s.head_hp -= e.damage * dt * 2.5
-                dx, dy = e.x-s.head[0], e.y-s.head[1]; dl = math.hypot(dx, dy) or 1
+            
+            hit_mod = False
+            for i, m in enumerate(s.modules):
+                if (e.x-mpos[i][0])**2 + (e.y-mpos[i][1])**2 <= (e.radius+CELL*0.5)**2:
+                    m.hp -= e.damage*dt*2.5; hit_mod = True
+                    dx, dy = e.x-mpos[i][0], e.y-mpos[i][1]; dl = math.hypot(dx,dy) or 1
+                    e.x += dx/dl*10; e.y += dy/dl*10; break
+            if not hit_mod and (e.x-s.head[0])**2 + (e.y-s.head[1])**2 <= (e.radius+CELL*0.6)**2:
+                s.head_hp -= e.damage*dt*2.5
+                dx, dy = e.x-s.head[0], e.y-s.head[1]; dl = math.hypot(dx,dy) or 1
                 e.x += dx/dl*10; e.y += dy/dl*10
 
-        if s.head_hp <= 0:
-            self.game_over = True; self.msg("ИГРА ОКОНЧЕНА", 2.0); return
+        if s.head_hp <= 0: self.game_over = True
 
+        # Пули
         for b in list(self.bullets):
             b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt
-            if b.life <= 0: self.bullets.remove(b); continue
+            if b.life <= 0:
+                if b.is_grenade:
+                    self.explosions.append(Explosion(b.x, b.y, 80))
+                    for e in self.enemies:
+                        if (b.x-e.x)**2 + (b.y-e.y)**2 <= (80+e.radius)**2: e.hp -= b.damage
+                self.bullets.remove(b); continue
+            
+            hit = False
             if b.enemy:
                 if (b.x-s.head[0])**2 + (b.y-s.head[1])**2 <= (b.radius+CELL*0.6)**2:
-                    s.head_hp = max(0, s.head_hp-b.damage); self.bullets.remove(b); continue
-                for bb in s.body:
-                    if (b.x-bb[0])**2 + (b.y-bb[1])**2 <= (b.radius+CELL*0.5)**2:
-                        s.head_hp = max(0, s.head_hp-b.damage*0.5); self.bullets.remove(b); break
+                    s.head_hp -= b.damage; hit = True
+                if not hit:
+                    for i, m in enumerate(s.modules):
+                        if (b.x-mpos[i][0])**2 + (b.y-mpos[i][1])**2 <= (b.radius+CELL*0.5)**2: m.hp -= b.damage; hit = True; break
             else:
                 for e in list(self.enemies):
                     if (b.x-e.x)**2 + (b.y-e.y)**2 <= (e.radius+b.radius)**2:
-                        e.hp -= b.damage; self.bullets.remove(b); break
+                        if b.is_grenade:
+                            self.explosions.append(Explosion(b.x, b.y, 80))
+                            for ee in self.enemies:
+                                if (b.x-ee.x)**2 + (b.y-ee.y)**2 <= (80+ee.radius)**2: ee.hp -= b.damage
+                        else: e.hp -= b.damage
+                        hit = True; break
+            if hit: self.bullets.remove(b)
 
+        # Смерть врагов
         for e in list(self.enemies):
             if e.hp <= 0:
-                self.enemies.remove(e)
-                s.xp += e.reward_xp; s.money += e.reward_money
+                self.enemies.remove(e); s.xp += e.reward_xp; s.money += e.reward_money
                 if s.xp >= s.xp_to_next:
                     s.xp -= s.xp_to_next; s.level += 1; s.xp_to_next = int(s.xp_to_next*1.35+4)
                     self.open_upgrade()
                     if self.show_upgrade: return
 
+        # Подбор предметов
         for p in list(self.pickups):
             touch = (p.x-s.head[0])**2 + (p.y-s.head[1])**2 <= (p.radius+CELL)**2
             if not touch:
                 for b in s.body:
-                    if (p.x-b[0])**2 + (p.y-b[1])**2 <= (p.radius+CELL*0.7)**2: touch=True; break
+                    if (p.x-b[0])**2 + (p.y-b[1])**2 <= (p.radius+CELL*0.7)**2: touch = True; break
             if touch:
-                if s.add_module(p.mtype):
-                    self.pickups.remove(p); self.msg(f"Получен: {MOD_NAMES[p.mtype]}")
-                else: self.msg("Лимит достигнут", 1.0)
+                if s.add_module(p.mtype): self.pickups.remove(p); self.msg(f"+{MOD_DATA[p.mtype]['name']}")
+                else: self.msg("Лимит типа достигнут", 1.0)
 
+        # Станции
         for st in self.stations:
             if not st.used and (st.x-s.head[0])**2 + (st.y-s.head[1])**2 <= (st.radius+CELL)**2:
                 self.open_station(st); return
 
+        # Спавн и таймеры
         self.wave_timer -= dt
         if self.wave_timer <= 0: self.spawn_wave(); self.wave_timer = max(6.0, 12.0-self.wave*0.3)
         self.pickup_timer -= dt
         if self.pickup_timer <= 0: self.spawn_pickup(); self.pickup_timer = random.uniform(6,11)
         self.station_timer -= dt
         if self.station_timer <= 0: self.spawn_station(); self.station_timer = random.uniform(30,50)
-        if self.message_timer > 0: self.message_timer -= dt
+
+        # Камера
+        self.cam_x += (s.head[0] - self.width/2 - self.cam_x) * 0.15
+        self.cam_y += (s.head[1] - self.height/2 - self.cam_y) * 0.15
+
+        self.lightning_lines = [(x1,y1,x2,y2,l-dt) for x1,y1,x2,y2,l in self.lightning_lines if l > 0]
+        self.explosions = [ex for ex in self.explosions if ex.life > 0]
+        for ex in self.explosions: ex.life -= dt
 
         self.redraw()
 
@@ -454,119 +573,34 @@ class GameWidget(Widget):
         self.wave += 1; count = min(3+self.wave*2, 30); base_hp = 12+self.wave*6
         for _ in range(count):
             x, y = self._random_ring_pos(280, 600); roll, w = random.random(), self.wave
-            if w >= 2 and roll < 0.15: e = Enemy(x, y, base_hp*2.5, 40+w*1.5, 18, 14, C_ENEMY_TANK, 4, 4, "tank")
-            elif w >= 3 and roll < 0.30: e = Enemy(x, y, base_hp*0.9, 55+w*2, 13, 6, C_ENEMY_SHOOTER, 3, 3, "shooter")
-            elif roll < 0.55: e = Enemy(x, y, base_hp*0.7, 100+w*3, 10, 6, C_ENEMY_FAST, 2, 2, "fast")
-            else: e = Enemy(x, y, base_hp, 60+w*2, 13, 8, C_ENEMY, 1, 1)
+            if w >= 2 and roll < 0.15: e = Enemy(x, y, base_hp*2.5, 40+w*1.5, 18, 14, COLOR_ENEMY_TANK, 4, 4, "tank"); UNLOCKED_ENEMIES.add("TANK")
+            elif w >= 3 and roll < 0.30: e = Enemy(x, y, base_hp*0.9, 55+w*2, 13, 6, COLOR_ENEMY_SHOOTER, 3, 3, "shooter", 1.5); UNLOCKED_ENEMIES.add("SHOOTER")
+            elif roll < 0.55: e = Enemy(x, y, base_hp*0.7, 100+w*3, 10, 6, COLOR_ENEMY_FAST, 2, 2, "fast"); UNLOCKED_ENEMIES.add("FAST")
+            else: e = Enemy(x, y, base_hp, 60+w*2, 13, 8, COLOR_ENEMY, 1, 1, "normal"); UNLOCKED_ENEMIES.add("NORMAL")
             self.enemies.append(e)
         self.msg(f"Волна {self.wave}")
 
     def spawn_pickup(self):
         if len(self.pickups) > 5: return
-        roll = random.random()
-        if roll < 0.04: mtype = MOD_AXES
-        elif roll < 0.40: mtype = random.choice([MOD_PISTOL, MOD_RIFLE, MOD_SNIPER])
-        elif roll < 0.60: mtype = MOD_SHIELD
-        elif roll < 0.85: mtype = random.choice([MOD_HEAL, MOD_BOOSTER])
-        else: mtype = random.choice([MOD_PISTOL, MOD_RIFLE, MOD_SNIPER])
-        if mtype == MOD_HEAL and self.snake.heals >= MAX_HEALS: return
-        if mtype == MOD_BOOSTER and self.snake.boosters >= MAX_BOOSTERS: return
-        x, y = self._random_ring_pos(140, 450); self.pickups.append(Pickup(x, y, mtype))
+        pool = []
+        for m, data in MOD_DATA.items():
+            if m == ModType.HEAL and self.snake.heals >= MAX_HEALS: continue
+            if m == ModType.BOOSTER and self.snake.boosters >= MAX_BOOSTERS: continue
+            weight = 1 if data["rarity"] == 5 else (3 if data["rarity"] == 4 else (5 if data["rarity"] == 3 else (10 if data["rarity"] == 2 else 20)))
+            pool.extend([m] * weight)
+        if not pool: return
+        x, y = self._random_ring_pos(140, 450); self.pickups.append(Pickup(x, y, random.choice(pool)))
 
     def spawn_station(self):
         if any(not s.used for s in self.stations): return
         self.stations = [s for s in self.stations if not s.used]
         x, y = self._random_ring_pos(200, 500); self.stations.append(Station(x, y))
 
-    def open_upgrade(self):
-        self.show_upgrade = True
-        opts, existing = [], {m.mtype for m in self.snake.modules}
-        for t in existing: opts.append((f"Усилить: {MOD_NAMES[t]}", ('upgrade', t)))
-        for t in [MOD_PISTOL, MOD_RIFLE, MOD_SNIPER, MOD_SHIELD, MOD_HEAL, MOD_BOOSTER]:
-            if t not in existing:
-                if t == MOD_HEAL and self.snake.heals >= MAX_HEALS: continue
-                if t == MOD_BOOSTER and self.snake.boosters >= MAX_BOOSTERS: continue
-                opts.append((f"Новый: {MOD_NAMES[t]}", ('add', t)))
-        random.shuffle(opts); self.upgrade_options = opts[:3]
-        self._layout_menu_buttons(len(self.upgrade_options), top_offset=0.55)
-
-    def apply_upgrade(self, idx):
-        if 0 <= idx < len(self.upgrade_options):
-            _, (kind, t) = self.upgrade_options[idx]; s = self.snake
-            if kind == 'upgrade':
-                for m in s.modules:
-                    if m.mtype == t: m.level += 1; m.max_hp *= 1.2; m.hp = m.max_hp; break
-            else: s.add_module(t)
-        self.show_upgrade = False; self.upgrade_options = []
-        for btn in self.menu_btns: btn.opacity = 0
-
-    def open_station(self, st):
-        self.station_menu, self.station_ref = True, st; st.used = True
-        self._layout_menu_buttons(4, top_offset=0.62)
-
-    def close_station(self):
-        self.station_menu = False
-        for btn in self.menu_btns: btn.opacity = 0
-
-    def station_repair(self):
-        s = self.snake
-        if not s.lost_modules: self.msg("Нет потерянных"); self.close_station(); return
-        cost = len(s.lost_modules)*8
-        if s.money < cost: self.msg(f"Нужно {cost}"); self.close_station(); return
-        s.money -= cost
-        restored, s.lost_modules = s.lost_modules[:], []; cnt = 0
-        for t in restored:
-            if t == MOD_HEAL and s.heals >= MAX_HEALS: continue
-            if t == MOD_BOOSTER and s.boosters >= MAX_BOOSTERS: continue
-            if s.add_module(t): cnt += 1
-        self.msg(f"Восстановлено: {cnt}")
-        self.close_station()
-
-    def station_heal(self):
-        heal = self.snake.head_max_hp * 0.25
-        self.snake.head_hp = min(self.snake.head_max_hp, self.snake.head_hp + heal)
-        self.msg("Хил 25%")
-        self.close_station()
-
-    def start_reorder(self):
-        self.close_station()
-        if len(self.snake.modules) < 2:
-            self.msg("Мало модулей"); return
-        self.reorder_mode = True
-        self._layout_menu_buttons(min(4, len(self.snake.modules)), top_offset=0.85, from_top=True)
-
-    def confirm_reorder(self, idx):
-        if idx < len(self.snake.modules) - 1:
-            mods = self.snake.modules
-            mods[idx], mods[idx+1] = mods[idx+1], mods[idx]
-        self.reorder_mode = False
-        for btn in self.menu_btns: btn.opacity = 0
-
-    def _layout_menu_buttons(self, count, top_offset=0.55, from_top=False):
-        btn_w = self.width * 0.7
-        btn_h = self.height * 0.09
-        x = (self.width - btn_w) / 2
-        for i in range(4):
-            if i < count:
-                if from_top:
-                    y = self.height * top_offset - i * (btn_h + 10)
-                else:
-                    start_center_y = self.height * top_offset
-                    y = start_center_y - (i - (count - 1) / 2) * (btn_h + 10) - btn_h / 2
-                self.menu_btns[i].size = (btn_w, btn_h)
-                self.menu_btns[i].pos = (x, y)
-                self.menu_btns[i].opacity = 1
-            else:
-                self.menu_btns[i].opacity = 0
-
     def on_touch_down(self, touch):
         if self.show_upgrade or self.station_menu or self.reorder_mode:
             return super().on_touch_down(touch)
-
-        jx = self.width * 0.82
-        jy = self.height * 0.15
-        r = min(self.width, self.height) * 0.14
-        if (touch.x - jx)**2 + (touch.y - jy)**2 <= r**2:
+        jx = self.width * 0.82; jy = self.height * 0.15
+        if (touch.x - jx)**2 + (touch.y - jy)**2 <= (min(self.width, self.height) * 0.14)**2:
             touch.ud['joystick'] = True
             self._handle_joystick(touch.x, touch.y, jx, jy)
             return True
@@ -574,302 +608,185 @@ class GameWidget(Widget):
 
     def on_touch_move(self, touch):
         if touch.ud.get('joystick'):
-            jx = self.width * 0.82
-            jy = self.height * 0.15
-            self._handle_joystick(touch.x, touch.y, jx, jy)
+            self._handle_joystick(touch.x, touch.y, self.width * 0.82, self.height * 0.15)
             return True
         return super().on_touch_move(touch)
 
     def _handle_joystick(self, x, y, cx, cy):
-        dx, dy = x - cx, y - cy
+        dx, dy = x-cx, y-cy
         if math.hypot(dx, dy) > 30:
-            l = math.hypot(dx, dy)
-            self.snake.dir = [dx/l, dy/l]
-            self.redraw()
+            l = math.hypot(dx, dy); self.snake.dir = [dx/l, dy/l]
 
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
-            Color(*C_BG); Rectangle(pos=(0, 0), size=(self.width, self.height))
+            Color(*COLOR_BG); Rectangle(pos=(0,0), size=(self.width, self.height))
+            
+            # Фон (сетка для ощущения движения)
+            Color(1, 1, 1, 0.03)
+            for i in range(-100, 100):
+                x = (i * 100 - self.cam_x) % (self.width + 200) - 100
+                y = (i * 100 - self.cam_y) % (self.height + 200) - 100
+                Line(points=[x, 0, x, self.height], width=1)
+                Line(points=[0, y, self.width, y], width=1)
 
-            ox = self.snake.head[0] - self.width / 2
-            oy = self.snake.head[1] - self.height / 2
-            def screen(x, y): return x - ox, y - oy
+            def screen(x, y): return x - self.cam_x, y - self.cam_y
 
+            # Станции
             for st in self.stations:
                 if not st.used:
                     sx, sy = screen(st.x, st.y)
-                    Color(*C_STATION); Ellipse(pos=(sx-st.radius, sy-st.radius), size=(st.radius*2, st.radius*2))
-
+                    Color(*COLOR_STATION); Ellipse(pos=(sx-st.radius, sy-st.radius), size=(st.radius*2, st.radius*2))
+            
+            # Пикапы
             for p in self.pickups:
                 sx, sy = screen(p.x, p.y)
-                Color(*MOD_COLORS[p.mtype]); Ellipse(pos=(sx-p.radius, sy-p.radius), size=(p.radius*2, p.radius*2))
+                Color(*MOD_DATA[p.mtype]["color"]); Ellipse(pos=(sx-p.radius, sy-p.radius), size=(p.radius*2, p.radius*2))
 
+            # Враги
             for e in self.enemies:
                 sx, sy = screen(e.x, e.y)
                 Color(*e.color); Ellipse(pos=(sx-e.radius, sy-e.radius), size=(e.radius*2, e.radius*2))
-                Color(*C_RED); Rectangle(pos=(sx-28, sy-e.radius-16), size=(56, 8))
-                Color(*C_GREEN); Rectangle(pos=(sx-28, sy-e.radius-16), size=(56*max(0,min(1,e.hp/e.max_hp)), 8))
+                Color(0.23, 0, 0); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28, 4))
+                Color(0, 0.86, 0.24); Rectangle(pos=(sx-14, sy-e.radius-8), size=(28*max(0,min(1,e.hp/e.max_hp)), 4))
 
+            # Пули
             for b in self.bullets:
                 sx, sy = screen(b.x, b.y)
-                Color(*(C_ENEMY_BULLET if b.enemy else C_BULLET))
+                Color(*(COLOR_ENEMY_BULLET if b.enemy else (0.78, 0.39, 0.19) if b.is_grenade else COLOR_BULLET))
                 Ellipse(pos=(sx-b.radius, sy-b.radius), size=(b.radius*2, b.radius*2))
 
+            # Змея
             s = self.snake
+            head_c, body_c, dark_c = COLOR_HEAD, COLOR_BODY, COLOR_BODY_DARK
+            if PLAYER.snake_skin == 1: head_c, body_c, dark_c = (1, 0.4, 0.4), (0.78, 0.2, 0.2), (0.58, 0.1, 0.1)
+            elif PLAYER.snake_skin == 2: head_c, body_c, dark_c = (0.4, 0.4, 1), (0.2, 0.2, 0.78), (0.1, 0.1, 0.58)
+            elif PLAYER.snake_skin == 3: head_c, body_c, dark_c = (1, 1, 0.4), (1, 0.78, 0.2), (0.78, 0.58, 0.1)
+
             for b in s.body:
                 sx, sy = screen(b[0], b[1])
-                Color(*C_BODY); Rectangle(pos=(sx-CELL*0.45, sy-CELL*0.45), size=(CELL*0.9, CELL*0.9))
+                Color(*dark_c); Rectangle(pos=(sx-CELL*0.45, sy-CELL*0.45), size=(CELL*0.9, CELL*0.9))
+                Color(*body_c); Rectangle(pos=(sx-CELL*0.38, sy-CELL*0.38), size=(CELL*0.76, CELL*0.76))
+            
+            hx, hy = screen(s.head[0], s.head[1])
+            Color(*body_c); Ellipse(pos=(hx-CELL*0.8, hy-CELL*0.8), size=(CELL*1.6, CELL*1.6))
+            Color(*head_c); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
 
+            # Модули
             mpos = s.module_positions()
             for i, m in enumerate(s.modules):
                 if i >= len(mpos): continue
                 mx, my = screen(mpos[i][0], mpos[i][1])
-                Color(*MOD_COLORS[m.mtype]); Rectangle(pos=(mx-CELL*0.3, my-CELL*0.3), size=(CELL*0.6, CELL*0.6))
-                Color(*C_RED); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48, 8))
-                Color(*C_GREEN); Rectangle(pos=(mx-24, my-CELL*0.8), size=(48*max(0,min(1,m.hp/m.max_hp)), 8))
+                col = MOD_DATA[m.mtype]["color"]
+                if PLAYER.gun_skin == 1: col = (min(1, col[0]*1.5), min(1, col[1]*1.5), min(1, col[2]*1.5))
+                elif PLAYER.gun_skin == 2: col = (1, 0.78, 0.2)
+                
+                Color(0,0,0); Rectangle(pos=(mx-CELL*0.32, my-CELL*0.32), size=(CELL*0.64, CELL*0.64))
+                Color(*col); Rectangle(pos=(mx-CELL*0.3, my-CELL*0.3), size=(CELL*0.6, CELL*0.6))
 
-                if m.mtype == MOD_SHIELD:
+                if m.mtype == ModType.SHIELD:
+                    for k in range(2):
+                        a = m.phase*2.5 + k*math.pi
+                        shx, shy = mx+math.cos(a)*30, my+math.sin(a)*30
+                        Color(1, 0.94, 0.7); Ellipse(pos=(shx-10, shy-10), size=(20, 20))
+                        Color(1, 0.7, 0); Line(circle=(shx, shy, 10), width=2)
+                elif m.mtype == ModType.AXES:
                     for k in range(2):
                         a = m.phase*3.0 + k*math.pi
-                        shx, shy = mx + math.cos(a) * 45, my + math.sin(a) * 45
-                        Color(*C_SHIELD); Line(circle=(shx, shy, 20), width=6)
-                if m.mtype == MOD_AXES:
-                    for k in range(2):
-                        a = m.phase*3.0 + k*math.pi
-                        ax, ay = mx + math.cos(a) * 55, my + math.sin(a) * 55
-                        Color(*C_AXES); Ellipse(pos=(ax-15, ay-15), size=(30, 30))
+                        ax, ay = mx+math.cos(a)*55, my+math.sin(a)*55
+                        Color(0.55, 0.27, 0.07); Line(points=[ax, ay, ax+math.cos(a+1.57)*15, ay+math.sin(a+1.57)*15], width=4)
+                        Color(0.78, 0.78, 0.78); Ellipse(pos=(ax-8, ay-8), size=(16, 16))
+                elif m.mtype == ModType.DRONE:
+                    dx, dy = screen(s.drone_pos[0], s.drone_pos[1])
+                    Color(0.6, 0.6, 0.6); Rectangle(pos=(dx-10, dy-10), size=(20, 20))
+                    Color(1, 1, 1); Line(rectangle=(dx-10, dy-10, 20, 20), width=2)
+                
+                Color(0.23, 0, 0); Rectangle(pos=(mx-14, my+CELL*0.5), size=(28, 4))
+                Color(0, 0.86, 0.24); Rectangle(pos=(mx-14, my+CELL*0.5), size=(28*max(0,min(1,m.hp/m.max_hp)), 4))
 
-            hx, hy = screen(s.head[0], s.head[1])
-            Color(*C_HEAD); Ellipse(pos=(hx-CELL*0.7, hy-CELL*0.7), size=(CELL*1.4, CELL*1.4))
+            # Молнии
+            for x1,y1,x2,y2,l in self.lightning_lines:
+                sx1, sy1 = screen(x1,y1); sx2, sy2 = screen(x2,y2)
+                Color(0.6, 1, 1); Line(points=[sx1,sy1, sx1+(sx2-sx1)/2+random.randint(-10,10), sy1+(sy2-sy1)/2+random.randint(-10,10), sx2,sy2], width=2)
 
-            jx = self.width * 0.82
-            jy = self.height * 0.15
-            r = min(self.width, self.height) * 0.14
-            Color(0.2, 0.25, 0.35); Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
-            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, r), width=6)
-            knob_x = jx + s.dir[0] * (r * 0.5)
-            knob_y = jy + s.dir[1] * (r * 0.5)
-            Color(0.9, 0.9, 0.3); Ellipse(pos=(knob_x - 40, knob_y - 40), size=(80, 80))
+            # Взрывы
+            for ex in self.explosions:
+                sx, sy = screen(ex.x, ex.y); r = ex.radius * (ex.life/0.5)
+                Color(1, 0.39, 0.19, ex.life/0.5); Ellipse(pos=(sx-r, sy-r), size=(r*2, r*2))
 
-            if self.show_upgrade:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
-                lbl_title = CoreLabel(text="УРОВЕНЬ! Выбери усиление:", font_size=int(min(self.width, self.height)*0.04),
-                                      bold=True, color=(1, 0.8, 0.3, 1))
-                lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture,
-                                          pos=(self.width/2 - lbl_title.texture.width/2, self.height*0.7),
-                                          size=lbl_title.texture.size)
-                for i, (label, _) in enumerate(self.upgrade_options):
-                    btn = self.menu_btns[i]
-                    bx, by = btn.pos
-                    bw, bh = btn.size
-                    Color(1, 1, 1); Line(rectangle=(bx, by, bw, bh), width=4)
-                    lbl = CoreLabel(text=f"{i+1}. {label}", font_size=int(min(self.width, self.height)*0.03),
-                                    color=(1, 1, 1, 1))
-                    lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture,
-                                              pos=(bx + 20, by + bh/2 - lbl.texture.height/2),
-                                              size=lbl.texture.size)
+            # Джойстик
+            jx, jy = self.width*0.82, self.height*0.15
+            r = min(self.width, self.height)*0.14
+            Color(0.2, 0.25, 0.35, 0.5); Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
+            Color(0.6, 0.7, 0.8); Line(circle=(jx, jy, r), width=4)
+            Color(0.9, 0.9, 0.3); Ellipse(pos=(jx+s.dir[0]*r*0.5-30, jy+s.dir[1]*r*0.5-30), size=(60, 60))
 
-            if self.station_menu:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
-                lbl_title = CoreLabel(text="СТАНЦИЯ", font_size=int(min(self.width, self.height)*0.04),
-                                      bold=True, color=(1, 0.8, 0.3, 1))
-                lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture,
-                                          pos=(self.width/2 - lbl_title.texture.width/2, self.height*0.85),
-                                          size=lbl_title.texture.size)
-                opts = [f"1. Восстановить ({len(s.lost_modules)*8}$)", "2. Переставить модули",
-                        "3. Лечение (25%)", "4. Выйти"]
+            # Меню (Улучшения / Станция / Перестановка)
+            if self.show_upgrade or self.station_menu or self.reorder_mode:
+                Color(0, 0, 0, 0.8); Rectangle(pos=(0,0), size=(self.width, self.height))
+                title_text = "УРОВЕНЬ!" if self.show_upgrade else "СТАНЦИЯ" if self.station_menu else "ПЕРЕСТАНОВКА"
+                lbl = CoreLabel(text=title_text, font_size=sp(24), bold=True, color=COLOR_GOLD)
+                lbl.refresh()
+                Color(1,1,1); Rectangle(texture=lbl.texture, pos=(self.width/2-lbl.texture.width/2, self.height*0.75), size=lbl.texture.size)
+
+                opts = []
+                if self.show_upgrade: opts = [o[0] for o in self.upgrade_options]
+                elif self.station_menu: opts = [f"1. Восстановить ({len(s.lost_modules)*8}$)", "2. Переставить", "3. Лечение", "4. Выйти"]
+                else: opts = [f"{i+1}. {MOD_DATA[m.mtype]['name']} L{m.level}" for i,m in enumerate(s.modules)]
+
                 for i, text in enumerate(opts):
+                    if i >= 4: break
                     btn = self.menu_btns[i]
-                    bx, by = btn.pos
-                    bw, bh = btn.size
-                    Color(1, 1, 1); Line(rectangle=(bx, by, bw, bh), width=4)
-                    lbl = CoreLabel(text=text, font_size=int(min(self.width, self.height)*0.03),
-                                    color=(1, 1, 1, 1))
-                    lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture,
-                                              pos=(bx + 20, by + bh/2 - lbl.texture.height/2),
-                                              size=lbl.texture.size)
-
-            if self.reorder_mode:
-                Color(0, 0, 0, 0.8); Rectangle(pos=(0, 0), size=(self.width, self.height))
-                lbl_title = CoreLabel(text="ПЕРЕСТАНОВКА (Кликни для сдвига)",
-                                      font_size=int(min(self.width, self.height)*0.035),
-                                      bold=True, color=(1, 0.8, 0.3, 1))
-                lbl_title.refresh()
-                Color(1, 1, 1); Rectangle(texture=lbl_title.texture,
-                                          pos=(self.width/2 - lbl_title.texture.width/2, self.height*0.92),
-                                          size=lbl_title.texture.size)
-                for i, m in enumerate(s.modules):
-                    if i >= len(self.menu_btns): break
-                    btn = self.menu_btns[i]
-                    bx, by = btn.pos
-                    bw, bh = btn.size
+                    bx, by = btn.pos; bw, bh = btn.size
+                    Color(1, 1, 1, 0.2); Rectangle(pos=(bx, by), size=(bw, bh))
                     Color(1, 1, 1); Line(rectangle=(bx, by, bw, bh), width=2)
-                    lbl = CoreLabel(text=f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}",
-                                    font_size=int(min(self.width, self.height)*0.03),
-                                    color=(1, 1, 1, 1))
-                    lbl.refresh()
-                    Color(1, 1, 1); Rectangle(texture=lbl.texture,
-                                              pos=(bx + 20, by + bh/2 - lbl.texture.height/2),
-                                              size=lbl.texture.size)
+                    lbl2 = CoreLabel(text=text, font_size=sp(16), color=(1,1,1,1))
+                    lbl2.refresh()
+                    Color(1,1,1); Rectangle(texture=lbl2.texture, pos=(bx+bw/2-lbl2.texture.width/2, by+bh/2-lbl2.texture.height/2), size=lbl2.texture.size)
 
+            if self.paused:
+                Color(0, 0, 0, 0.6); Rectangle(pos=(0,0), size=(self.width, self.height))
+                lbl = CoreLabel(text="ПАУЗА", font_size=sp(40), bold=True, color=(1,1,1,1))
+                lbl.refresh()
+                Color(1,1,1); Rectangle(texture=lbl.texture, pos=(self.width/2-lbl.texture.width/2, self.height/2), size=lbl.texture.size)
 
-class MainMenu(FloatLayout):
-    def __init__(self, start_callback, continue_callback, exit_callback, has_save=False, **kwargs):
-        super().__init__(**kwargs)
+            if self.message_timer > 0:
+                lbl = CoreLabel(text=self.message, font_size=sp(20), bold=True, color=COLOR_GOLD)
+                lbl.refresh()
+                Color(1,1,1); Rectangle(texture=lbl.texture, pos=(self.width/2-lbl.texture.width/2, self.height*0.85), size=lbl.texture.size)
 
-        with self.canvas.before:
-            Color(0.05, 0.06, 0.09, 1)
-            self.bg_rect = Rectangle(pos=self.pos, size=self.size)
-        self.bind(pos=self.update_bg, size=self.update_bg)
-
-        title = Label(text="ЗМЕЙКА-РОГАЛИК",
-                      pos_hint={'center_x': 0.5, 'center_y': 0.82},
-                      font_size='72sp', bold=True, color=(1, 0.8, 0.3, 1))
-        self.add_widget(title)
-
-        btn_start = Button(text="НОВАЯ ИГРА",
-                           size_hint=(None, None), size=(600, 140),
-                           pos_hint={'center_x': 0.5, 'center_y': 0.6},
-                           background_color=(0.2, 0.7, 0.4, 1), font_size='40sp')
-        btn_start.bind(on_press=start_callback)
-        self.add_widget(btn_start)
-
-        y = 0.45
-        if has_save:
-            btn_cont = Button(text="ПРОДОЛЖИТЬ",
-                              size_hint=(None, None), size=(600, 140),
-                              pos_hint={'center_x': 0.5, 'center_y': y},
-                              background_color=(0.2, 0.5, 0.8, 1), font_size='40sp')
-            btn_cont.bind(on_press=continue_callback)
-            self.add_widget(btn_cont)
-            y -= 0.15
-
-        btn_exit = Button(text="ВЫЙТИ",
-                          size_hint=(None, None), size=(600, 140),
-                          pos_hint={'center_x': 0.5, 'center_y': y},
-                          background_color=(0.8, 0.2, 0.2, 1), font_size='40sp')
-        btn_exit.bind(on_press=exit_callback)
-        self.add_widget(btn_exit)
-
-    def update_bg(self, *args):
-        self.bg_rect.pos = self.pos
-        self.bg_rect.size = self.size
-
-
+# ---------- Приложение ----------
 class SnakeApp(App):
     def build(self):
         self.root = FloatLayout()
-        self._show_menu()
-        return self.root
+        self.game = GameWidget(size_hint=(1,1), pos_hint={'x':0, 'y':0})
+        self.root.add_widget(self.game)
 
-    def _has_save(self):
-        return os.path.exists(get_save_path())
-
-    def _show_menu(self):
-        self.menu = MainMenu(
-            start_callback=self.start_game,
-            continue_callback=self.continue_game,
-            exit_callback=self.stop,
-            has_save=self._has_save()
-        )
-        self.root.add_widget(self.menu)
-
-    def _clear_menu(self):
-        if self.menu in self.root.children:
-            self.root.remove_widget(self.menu)
-
-    def _build_hud(self):
-        # HUD: всё смещено вправо. Шрифт уменьшен.
-        
-        # 1. Основная инфа (HP, Lvl, Wave, $)
-        self.hud = Label(text="",
-                         pos_hint={'right': 0.98, 'top': 0.98}, size_hint=(0.4, 0.1),
-                         color=(1, 1, 1, 1), font_size=sp(16), bold=True, halign='right', valign='top')
+        self.hud = Label(text="", pos_hint={'right': 0.98, 'top': 0.98}, size_hint=(0.4, 0.1),
+                         font_size=sp(16), bold=True, halign='right', valign='top')
         self.hud.bind(size=self.hud.setter('text_size'))
         self.root.add_widget(self.hud)
 
-        # 2. Список модулей (справа, ниже HUD)
-        self.module_list = Label(text="",
-                                 pos_hint={'right': 0.98, 'top': 0.85}, size_hint=(0.4, 0.4),
-                                 color=(0.8, 0.8, 0.8, 1), font_size=sp(12), bold=True, halign='right', valign='top')
+        self.module_list = Label(text="", pos_hint={'right': 0.98, 'top': 0.85}, size_hint=(0.4, 0.4),
+                                 font_size=sp(12), bold=True, halign='right', valign='top')
         self.module_list.bind(size=self.module_list.setter('text_size'))
         self.root.add_widget(self.module_list)
 
-        # 3. Уведомления (по центру сверху, чтобы не мешать)
-        self.notify_label = Label(text="",
-                                  pos_hint={'center_x': 0.5, 'top': 0.9}, size_hint=(0.6, 0.1),
-                                  color=(1, 0.8, 0.3, 1), font_size=sp(18), bold=True, halign='center')
-        self.notify_label.bind(size=self.notify_label.setter('text_size'))
-        self.root.add_widget(self.notify_label)
-
         Clock.schedule_interval(self.update_hud, 0.1)
-
-    def start_game(self, instance):
-        self._clear_menu()
-        self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
-        self.root.add_widget(self.game)
-        self._build_hud()
-
-    def continue_game(self, instance):
-        save_path = get_save_path()
-        if not os.path.exists(save_path):
-            self.start_game(instance)
-            return
-        try:
-            with open(save_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            print("LOAD ERROR:", e)
-            self.start_game(instance)
-            return
-
-        self._clear_menu()
-        self.game = GameWidget(size_hint=(1, 1), pos_hint={'x': 0, 'y': 0})
-        self.game.load_from_dict(data)
-        self.root.add_widget(self.game)
-        self._build_hud()
-
-    def go_to_menu(self):
-        if hasattr(self, 'game'):
-            try: self.root.remove_widget(self.game)
-            except Exception: pass
-        for attr in ('hud', 'module_list', 'notify_label'):
-            if hasattr(self, attr):
-                try: self.root.remove_widget(getattr(self, attr))
-                except Exception: pass
-        Clock.unschedule(self.update_hud)
-        self._show_menu()
+        return self.root
 
     def update_hud(self, dt):
-        g = getattr(self, 'game', None)
-        if not g: return
-        s = g.snake
-        
-        # Кратко: HP | Lvl
-        # Wave | $
-        text = f"HP: {int(s.head_hp)}  |  Lvl: {s.level}\nWave: {g.wave}  |  $: {s.money}"
-        self.hud.text = text
-
-        # Модули (сокращаем, чтобы влезло)
+        g = self.game; s = g.snake
+        self.hud.text = f"HP: {int(s.head_hp)}/{int(s.head_max_hp)} | Lvl: {s.level}\nWave: {g.wave} | $: {s.money}"
         mod_text = "Модули:\n"
         for i, m in enumerate(s.modules):
-            mod_text += f"{i+1}. {MOD_NAMES[m.mtype]} L{m.level}\n"
+            mod_text += f"{i+1}. {MOD_DATA[m.mtype]['name']} L{m.level}\n"
         self.module_list.text = mod_text
 
-        if g.message_timer > 0:
-            self.notify_label.text = g.message
-        else:
-            self.notify_label.text = ""
-
     def on_stop(self):
-        if hasattr(self, 'game') and self.game and not self.game.game_over:
-            self.game.save_game()
-
+        PLAYER.money += self.game.snake.money
+        if self.game.wave > PLAYER.high_score: PLAYER.high_score = self.game.wave
+        PLAYER.save()
 
 if __name__ == '__main__':
     SnakeApp().run()
