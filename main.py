@@ -4,6 +4,7 @@ Config.set('graphics', 'multisamples', '0')
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.clock import Clock
@@ -16,10 +17,9 @@ import os
 import json
 from enum import Enum, auto
 
-# ---------- Пути для сохранений (безопасно для Android) ----------
+# ---------- Пути для сохранений ----------
 def get_save_path():
     app = App.get_running_app()
-    # user_data_dir на Android = /data/data/<package>/files, на ПК = ~/.<appname>
     base = app.user_data_dir if app else os.path.expanduser("~")
     try: os.makedirs(base, exist_ok=True)
     except Exception: base = os.path.expanduser("~")
@@ -47,8 +47,6 @@ COLOR_STATION = (255/255, 200/255, 60/255)
 COLOR_TEXT = (230/255, 230/255, 230/255)
 COLOR_GOLD = (255/255, 210/255, 80/255)
 
-RARITY_COLORS = {1: (200/255, 200/255, 200/255), 2: (100/255, 200/255, 255/255), 3: (180/255, 100/255, 255/255), 4: (255/255, 100/255, 200/255), 5: (255/255, 200/255, 50/255)}
-RARITY_NAMES = {1: "Обычная", 2: "Редкая", 3: "Сверхредкая", 4: "Эпическая", 5: "Легендарная"}
 UNLOCKED_ENEMIES = set()
 UNLOCKED_MODULES = set()
 
@@ -163,19 +161,25 @@ class Snake:
             if m.mtype == ModType.BOOSTER: self.boosters = max(0, self.boosters-1)
             if m.mtype == ModType.HEAL: self.heals = max(0, self.heals-1)
 
-# ---------- Игровой виджет (без изменений в логике, только безопасный старт) ----------
+# ---------- Игровой виджет ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.reset()
-        Clock.schedule_interval(self.update, 1/60)
+        # ВАЖНО: Запускаем таймер только после того, как виджет получит размеры
+        self.bind(size=self._start_clock, pos=self._start_clock)
         self.menu_btns = []
         for i in range(4):
             btn = Button(text="", size_hint=(None, None), size=(10, 10), background_color=(0,0,0,0), opacity=0)
             btn.bind(on_press=lambda inst, idx=i: self.menu_action(idx)); self.menu_btns.append(btn); self.add_widget(btn)
         self.pause_button = Button(text="II", size_hint=(None, None), background_color=(0.3, 0.3, 0.3, 0.7), font_size=sp(20))
         self.pause_button.bind(on_press=self.toggle_pause); self.add_widget(self.pause_button)
-        self.bind(size=self._layout_static_widgets, pos=self._layout_static_widgets); self._layout_static_widgets()
+
+    def _start_clock(self, *args):
+        if self.width > 0 and self.height > 0 and not hasattr(self, '_clock_started'):
+            self._clock_started = True
+            Clock.schedule_interval(self.update, 1/60)
+            self._layout_static_widgets()
 
     def _layout_static_widgets(self, *args):
         if not self.width or not self.height: return
@@ -247,8 +251,11 @@ class GameWidget(Widget):
             else: self.menu_btns[i].opacity = 0
 
     def update(self, dt):
+        if self.width <= 0 or self.height <= 0: return  # Защита от нулевых размеров
         if self.message_timer > 0: self.message_timer -= dt
         if self.game_over or self.paused or self.show_upgrade or self.station_menu or self.reorder_mode: self.redraw(); return
+        
+        # ... (ОСТАЛЬНАЯ ЛОГИКА ИГРЫ БЕЗ ИЗМЕНЕНИЙ) ...
         s = self.snake
         speed = s.speed * (1 + SNAKE_SPEED_PER_BOOST * s.boosters)
         s.head[0] += s.dir[0] * speed * dt; s.head[1] += s.dir[1] * speed * dt
@@ -387,6 +394,8 @@ class GameWidget(Widget):
         self.explosions = [ex for ex in self.explosions if ex.life > 0]
         for ex in self.explosions: ex.life -= dt
         self.redraw()
+
+    # ... (ОСТАЛЬНЫЕ МЕТОДЫ SPWAN, REDRAW, ON_TOUCH БЕЗ ИЗМЕНЕНИЙ) ...
     def _random_ring_pos(self, rmin, rmax):
         ang = random.uniform(0, math.tau); r = random.uniform(rmin, rmax)
         return self.snake.head[0]+math.cos(ang)*r, self.snake.head[1]+math.sin(ang)*r
@@ -497,32 +506,44 @@ class GameWidget(Widget):
             if self.message_timer > 0:
                 lbl = CoreLabel(text=self.message, font_size=sp(20), bold=True, color=COLOR_GOLD); lbl.refresh(); Color(1,1,1); Rectangle(texture=lbl.texture, pos=(self.width/2-lbl.texture.width/2, self.height*0.85), size=lbl.texture.size)
 
-# ---------- ГЛАВНОЕ МЕНЮ (новое) ----------
-class MainMenu(FloatLayout):
+# ---------- ГЛАВНОЕ МЕНЮ (переделано на BoxLayout) ----------
+class MainMenu(BoxLayout):
     def __init__(self, start_callback, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(orientation='vertical', padding=dp(50), spacing=dp(20), **kwargs)
+        
         with self.canvas.before:
             Color(*COLOR_BG); self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self.update_bg, size=self.update_bg)
         
-        title = Label(text="ЗМЕЙКА-РОГАЛИК", pos_hint={'center_x': 0.5, 'center_y': 0.8}, font_size=sp(40), bold=True, color=COLOR_GOLD)
+        # Заголовок
+        title = Label(text="ЗМЕЙКА-РОГАЛИК", font_size=sp(40), bold=True, color=COLOR_GOLD, size_hint_y=0.2)
         self.add_widget(title)
         
-        btn_start = Button(text="ИГРАТЬ", size_hint=(None, None), size=(dp(250), dp(70)), pos_hint={'center_x': 0.5, 'center_y': 0.5}, background_color=(0.2, 0.7, 0.4, 1), font_size=sp(24))
+        # Пустое место для отступа
+        self.add_widget(Widget(size_hint_y=0.1))
+        
+        # Кнопка Играть
+        btn_start = Button(text="ИГРАТЬ", size_hint=(None, None), size=(dp(250), dp(70)), 
+                           pos_hint={'center_x': 0.5}, background_color=(0.2, 0.7, 0.4, 1), font_size=sp(24))
         btn_start.bind(on_press=start_callback)
         self.add_widget(btn_start)
         
-        btn_exit = Button(text="ВЫЙТИ", size_hint=(None, None), size=(dp(250), dp(70)), pos_hint={'center_x': 0.5, 'center_y': 0.3}, background_color=(0.8, 0.2, 0.2, 1), font_size=sp(24))
+        # Кнопка Выйти
+        btn_exit = Button(text="ВЫЙТИ", size_hint=(None, None), size=(dp(250), dp(70)), 
+                          pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1), font_size=sp(24))
         btn_exit.bind(on_press=self.exit_app)
         self.add_widget(btn_exit)
         
-        # Показываем баланс и рекорд
+        # Статистика внизу
         stats_text = f"Баланс: {PLAYER.money} $\nРекорд: {PLAYER.high_score} волн"
-        stats = Label(text=stats_text, pos_hint={'x': 0.05, 'top': 0.95}, font_size=sp(14), color=COLOR_TEXT)
+        stats = Label(text=stats_text, font_size=sp(14), color=COLOR_TEXT, size_hint_y=0.2)
         self.add_widget(stats)
     
-    def update_bg(self, *args): self.bg_rect.pos = self.pos; self.bg_rect.size = self.size
-    def exit_app(self, instance): App.get_running_app().stop()
+    def update_bg(self, *args): 
+        self.bg_rect.pos = self.pos
+        self.bg_rect.size = self.size
+    def exit_app(self, instance): 
+        App.get_running_app().stop()
 
 # ---------- Приложение ----------
 class SnakeApp(App):
