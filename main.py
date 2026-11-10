@@ -103,20 +103,44 @@ class Snake:
         self.speed = 180 * (1.2 if PLAYER.upg_legs else 1.0)
         self.hp = 100 + (30 if PLAYER.upg_skin else 0)
         self.max_hp = self.hp
-        
-        # ТЕЛО: только 1 сегмент (плюс голова)
         self.body = [[self.x - CELL, self.y]]
-        
         self.mods = []
         self.level, self.xp, self.xp_next = 1, 0, 10
         self.money = 0
-        
         self.add_mod(ModType.PISTOL)
 
     def add_mod(self, mtype):
         self.mods.append({"type": mtype, "lvl": 1, "cd": 0.0})
         last = self.body[-1] if self.body else [self.x, self.y]
         self.body.append([last[0], last[1]])
+
+# ---------- Меню улучшений (Отдельный виджет) ----------
+class UpgradeMenu(FloatLayout):
+    def __init__(self, options, callback, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.7)
+            self.bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self.update_bg, size=self.update_bg)
+        
+        layout = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(20),
+                           size_hint=(0.8, 0.8), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        
+        title = Label(text="УРОВЕНЬ ПОВЫШЕН!", font_size=sp(24), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.2)
+        layout.add_widget(title)
+        
+        for i, opt in enumerate(options):
+            mtype = opt
+            btn = Button(text=f"{MOD_DATA[mtype]['name']}", font_size=sp(18),
+                         size_hint_y=0.2, background_color=(*MOD_DATA[mtype]['color'], 1))
+            btn.bind(on_press=lambda inst, idx=i: callback(idx))
+            layout.add_widget(btn)
+            
+        self.add_widget(layout)
+
+    def update_bg(self, *args):
+        self.bg.pos = self.pos
+        self.bg.size = self.size
 
 # ---------- Главный Игровой Виджет ----------
 class GameWidget(Widget):
@@ -135,118 +159,88 @@ class GameWidget(Widget):
         self.enemies, self.bullets, self.pickups = [], [], []
         self.wave, self.wave_timer = 0, 3.0
         self.pickup_timer = 6.0
-        self.game_over, self.upgrading = False, False
+        self.game_over = False
+        self.upgrading = False
         self.upg_opts = []
 
     def update(self, dt):
-        if self.game_over or self.upgrading or self.width <= 0: 
+        if self.game_over or self.upgrading or self.width <= 0:
             return
 
         s = self.snake
-        
-        # --- ДВИЖЕНИЕ ЗМЕИ ---
         s.x += s.dx * s.speed * dt
         s.y += s.dy * s.speed * dt
-        
-        # Движение тела за головой
-        target_x, target_y = s.x, s.y
-        for i in range(len(s.body)):
-            dx = target_x - s.body[i][0]
-            dy = target_y - s.body[i][1]
-            dist = math.hypot(dx, dy)
-            # Если расстояние больше ячейки, тянем сегмент
-            if dist > CELL:
-                # Защита от деления на ноль
-                if dist < 0.001: dist = 0.001
-                s.body[i][0] = target_x - (dx / dist) * CELL
-                s.body[i][1] = target_y - (dy / dist) * CELL
-            target_x, target_y = s.body[i][0], s.body[i][1]
 
-        # --- СТРЕЛЬБА МОДУЛЕЙ ---
+        tx, ty = s.x, s.y
+        for i in range(len(s.body)):
+            dx = tx - s.body[i][0]
+            dy = ty - s.body[i][1]
+            d = math.hypot(dx, dy)
+            if d > CELL:
+                if d < 0.001: d = 0.001
+                s.body[i][0] = tx - (dx / d) * CELL
+                s.body[i][1] = ty - (dy / d) * CELL
+            tx, ty = s.body[i][0], s.body[i][1]
+
         for i in range(min(len(s.mods), len(s.body))):
             m = s.mods[i]
             m["cd"] = max(0.0, m["cd"] - dt)
-            
             if m["type"] in GUN_STATS and m["cd"] <= 0:
-                # Позиция модуля
                 mx, my = s.body[i][0], s.body[i][1]
-                
-                # Ищем ближайшего врага
-                best_dist = 350**2
-                target_enemy = None
+                best_dist, target_enemy = 350**2, None
                 for e in self.enemies:
                     d2 = (mx - e.x)**2 + (my - e.y)**2
                     if d2 < best_dist:
-                        best_dist = d2
-                        target_enemy = e
-                
+                        best_dist, target_enemy = d2, e
                 if target_enemy:
                     ang = math.atan2(target_enemy.y - my, target_enemy.x - mx)
                     dmg, _, cd = GUN_STATS[m["type"]]
-                    
                     if m["type"] == ModType.TESLA:
                         target_enemy.hp -= dmg * (1 + 0.2 * m["lvl"])
-                        m["cd"] = cd
                     else:
-                        # Ограничение пуль
                         if len(self.bullets) < MAX_BULLETS:
                             self.bullets.append(Bullet(mx, my, math.cos(ang) * 700, math.sin(ang) * 700, dmg * (1 + 0.2 * m["lvl"])))
-                        m["cd"] = cd
+                    m["cd"] = cd
 
-        # --- ПУЛИ ---
         for b in self.bullets[:]:
             b.x += b.vx * dt
             b.y += b.vy * dt
-            
             hit = False
             for e in self.enemies[:]:
-                # Проверка попадания
                 if (b.x - e.x)**2 + (b.y - e.y)**2 < (e.radius + 8)**2:
                     e.hp -= b.dmg
                     hit = True
                     break
-            
-            # Удаляем пулю, если попала или улетела далеко
             if hit or (b.x - s.x)**2 + (b.y - s.y)**2 > 1200**2:
                 if b in self.bullets:
                     self.bullets.remove(b)
 
-        # --- ВРАГИ ---
         for e in self.enemies[:]:
             ang = math.atan2(s.y - e.y, s.x - e.x)
             e.x += math.cos(ang) * e.speed * dt
             e.y += math.sin(ang) * e.speed * dt
-            
-            # УРОН ТОЛЬКО В ГОЛОВУ
             if (e.x - s.x)**2 + (e.y - s.y)**2 < (e.radius + 15)**2:
                 s.hp -= e.damage * dt * 2.0
-            
-            # Смерть врага
             if e.hp <= 0:
                 self.enemies.remove(e)
                 s.money += 5
                 s.xp += 3
-                
-                # Повышение уровня
                 if s.xp >= s.xp_next:
                     s.xp -= s.xp_next
                     s.level += 1
                     s.xp_next = int(s.xp_next * 1.5)
                     self.open_upgrade()
+                    return
 
-        # --- ПОДБОР ПРЕДМЕТОВ ---
         for p in self.pickups[:]:
             if (p.x - s.x)**2 + (p.y - s.y)**2 < (20 + 15)**2:
                 self.pickups.remove(p)
                 s.add_mod(p.mtype)
 
-        # --- ТАЙМЕРЫ ---
         self.wave_timer -= dt
         if self.wave_timer <= 0:
             self.wave += 1
             self.wave_timer = 15.0
-            
-            # Спавн врагов
             if len(self.enemies) < MAX_ENEMIES:
                 count = min(3 + self.wave, 10)
                 for _ in range(count):
@@ -257,7 +251,7 @@ class GameWidget(Widget):
                     hp = 10 + self.wave * 5
                     spd = 50 + self.wave * 3
                     self.enemies.append(Enemy(ex, ey, hp, spd, 15, (1, 0.3, 0.3), 10))
-        
+
         self.pickup_timer -= dt
         if self.pickup_timer <= 0 and len(self.pickups) < MAX_PICKUPS:
             a = random.uniform(0, math.tau)
@@ -274,90 +268,100 @@ class GameWidget(Widget):
 
     def open_upgrade(self):
         self.upgrading = True
-        self.upg_opts = random.sample(list(ModType), 3)
+        available_mods = list(ModType)
+        self.upg_opts = random.sample(available_mods, min(3, len(available_mods)))
+        
+        # Показываем Kivy-меню поверх игры
+        app = App.get_running_app()
+        menu = UpgradeMenu(options=self.upg_opts, callback=self.apply_upgrade)
+        app.root.add_widget(menu)
 
     def apply_upgrade(self, idx):
-        s = self.snake
-        t = self.upg_opts[idx]
-        for m in s.mods:
-            if m["type"] == t:
-                m["lvl"] += 1
-                self.upgrading = False
-                return
-        s.add_mod(t)
+        app = App.get_running_app()
+        # Удаляем меню
+        for child in app.root.children[:]:
+            if isinstance(child, UpgradeMenu):
+                app.root.remove_widget(child)
+                
+        if 0 <= idx < len(self.upg_opts):
+            t = self.upg_opts[idx]
+            s = self.snake
+            found = False
+            for m in s.mods:
+                if m["type"] == t:
+                    m["lvl"] += 1
+                    found = True
+                    break
+            if not found:
+                s.add_mod(t)
+        
         self.upgrading = False
+        self.redraw()
 
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
             Color(0.1, 0.1, 0.15)
-            Rectangle(pos=(0,0), size=(self.width, self.height))
-            
+            Rectangle(pos=(0, 0), size=(self.width, self.height))
+
             def scr(x, y):
-                return x - self.snake.x + self.width/2, y - self.snake.y + self.height/2
-            
-            # Враги
+                return x - self.snake.x + self.width / 2, y - self.snake.y + self.height / 2
+
             for e in self.enemies:
                 sx, sy = scr(e.x, e.y)
-                if -50 < sx < self.width+50 and -50 < sy < self.height+50:
+                if -50 < sx < self.width + 50 and -50 < sy < self.height + 50:
                     Color(*e.color)
-                    Ellipse(pos=(sx-e.radius, sy-e.radius), size=(e.radius*2, e.radius*2))
-            
-            # Пикапы
+                    Ellipse(pos=(sx - e.radius, sy - e.radius), size=(e.radius * 2, e.radius * 2))
+
             for p in self.pickups:
                 sx, sy = scr(p.x, p.y)
-                if -50 < sx < self.width+50 and -50 < sy < self.height+50:
+                if -50 < sx < self.width + 50 and -50 < sy < self.height + 50:
                     Color(*MOD_DATA[p.mtype]["color"])
-                    Ellipse(pos=(sx-12, sy-12), size=(24, 24))
+                    Ellipse(pos=(sx - 12, sy - 12), size=(24, 24))
 
-            # Пули
             for b in self.bullets:
                 sx, sy = scr(b.x, b.y)
-                if -50 < sx < self.width+50 and -50 < sy < self.height+50:
+                if -50 < sx < self.width + 50 and -50 < sy < self.height + 50:
                     Color(1, 0.9, 0.2)
-                    Ellipse(pos=(sx-4, sy-4), size=(8, 8))
+                    Ellipse(pos=(sx - 4, sy - 4), size=(8, 8))
 
-            # Змея (тело)
             s = self.snake
             c_head, c_body = (0.2, 0.8, 0.4), (0.1, 0.6, 0.3)
             if PLAYER.snake_skin == 1:
                 c_head, c_body = (0.8, 0.2, 0.2), (0.6, 0.1, 0.1)
             elif PLAYER.snake_skin == 2:
                 c_head, c_body = (0.2, 0.2, 0.8), (0.1, 0.1, 0.6)
-            
+
             for b in s.body:
                 sx, sy = scr(b[0], b[1])
-                if -50 < sx < self.width+50 and -50 < sy < self.height+50:
+                if -50 < sx < self.width + 50 and -50 < sy < self.height + 50:
                     Color(*c_body)
-                    Rectangle(pos=(sx-CELL*0.4, sy-CELL*0.4), size=(CELL*0.8, CELL*0.8))
-            
-            # Голова
+                    Rectangle(pos=(sx - CELL * 0.4, sy - CELL * 0.4), size=(CELL * 0.8, CELL * 0.8))
+
             hx, hy = scr(s.x, s.y)
             Color(*c_head)
-            Ellipse(pos=(hx-CELL*0.6, hy-CELL*0.6), size=(CELL*1.2, CELL*1.2))
+            Ellipse(pos=(hx - CELL * 0.6, hy - CELL * 0.6), size=(CELL * 1.2, CELL * 1.2))
 
-            # Модули
             for i, m in enumerate(s.mods):
                 if i < len(s.body):
                     mx, my = scr(s.body[i][0], s.body[i][1])
-                    if -50 < mx < self.width+50 and -50 < my < self.height+50:
+                    if -50 < mx < self.width + 50 and -50 < my < self.height + 50:
                         Color(*MOD_DATA[m["type"]]["color"])
-                        Rectangle(pos=(mx-CELL*0.25, my-CELL*0.25), size=(CELL*0.5, CELL*0.5))
+                        Rectangle(pos=(mx - CELL * 0.25, my - CELL * 0.25), size=(CELL * 0.5, CELL * 0.5))
 
-            # Джойстик
             jx, jy = self.width * 0.85, self.height * 0.15
             r = min(self.width, self.height) * 0.12
             Color(0.3, 0.3, 0.4, 0.5)
-            Ellipse(pos=(jx-r, jy-r), size=(r*2, r*2))
+            Ellipse(pos=(jx - r, jy - r), size=(r * 2, r * 2))
             Color(0.8, 0.8, 0.2)
-            Ellipse(pos=(jx+s.dx*r*0.6-15, jy+s.dy*r*0.6-15), size=(30, 30))
+            Ellipse(pos=(jx + s.dx * r * 0.6 - 15, jy + s.dy * r * 0.6 - 15), size=(30, 30))
 
     def on_touch_down(self, touch):
         if self.upgrading or self.game_over:
             return super().on_touch_down(touch)
-            
+
         jx, jy = self.width * 0.85, self.height * 0.15
-        if (touch.x-jx)**2 + (touch.y-jy)**2 < (min(self.width, self.height)*0.15)**2:
+        if (touch.x - jx) ** 2 + (touch.y - jy) ** 2 < (min(self.width, self.height) * 0.15) ** 2:
             touch.ud['joy'] = True
             return True
         return super().on_touch_down(touch)
@@ -365,7 +369,7 @@ class GameWidget(Widget):
     def on_touch_move(self, touch):
         if touch.ud.get('joy'):
             jx, jy = self.width * 0.85, self.height * 0.15
-            dx, dy = touch.x-jx, touch.y-jy
+            dx, dy = touch.x - jx, touch.y - jy
             d = math.hypot(dx, dy)
             if d > 20:
                 self.snake.dx = dx / d
@@ -377,27 +381,31 @@ class GameWidget(Widget):
 class MainMenu(BoxLayout):
     def __init__(self, start_cb, shop_cb, best_cb, **kwargs):
         super().__init__(orientation='vertical', padding=dp(30), spacing=dp(15), **kwargs)
-        
+
         title = Label(text="ЗМЕЙКА-РОГАЛИК", font_size=sp(30), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.3)
         self.add_widget(title)
-        
-        btn_play = Button(text="ИГРАТЬ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
+
+        btn_play = Button(text="ИГРАТЬ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)),
+                          pos_hint={'center_x': 0.5})
         btn_play.bind(on_press=start_cb)
         self.add_widget(btn_play)
-        
-        btn_shop = Button(text="МАГАЗИН", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
+
+        btn_shop = Button(text="МАГАЗИН", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)),
+                          pos_hint={'center_x': 0.5})
         btn_shop.bind(on_press=shop_cb)
         self.add_widget(btn_shop)
-        
-        btn_exit = Button(text="ВЫЙТИ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1))
+
+        btn_exit = Button(text="ВЫЙТИ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)),
+                          pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1))
         btn_exit.bind(on_press=App.get_running_app().stop)
         self.add_widget(btn_exit)
 
 class ShopMenu(BoxLayout):
     def __init__(self, back_cb, **kwargs):
         super().__init__(orientation='vertical', padding=dp(20), spacing=dp(10), **kwargs)
-        self.add_widget(Label(text=f"Баланс: {PLAYER.money} $", font_size=sp(20), color=(1, 0.8, 0.2), size_hint_y=0.2))
-        
+        self.add_widget(
+            Label(text=f"Баланс: {PLAYER.money} $", font_size=sp(20), color=(1, 0.8, 0.2), size_hint_y=0.2))
+
         row1 = BoxLayout(size_hint_y=0.2)
         row1.add_widget(Label(text="Змея:", font_size=sp(16)))
         btn_s1 = Button(text="Зеленая", font_size=sp(14))
@@ -410,7 +418,7 @@ class ShopMenu(BoxLayout):
         row1.add_widget(btn_s2)
         row1.add_widget(btn_s3)
         self.add_widget(row1)
-        
+
         row2 = BoxLayout(size_hint_y=0.2)
         row2.add_widget(Label(text="Улучшения:", font_size=sp(16)))
         btn_u1 = Button(text="Скорость (200)", font_size=sp(14))
@@ -420,10 +428,11 @@ class ShopMenu(BoxLayout):
         row2.add_widget(btn_u1)
         row2.add_widget(btn_u2)
         self.add_widget(row2)
-        
+
         self.add_widget(Widget(size_hint_y=0.2))
-        
-        btn_back = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None), size=(dp(200), dp(50)), pos_hint={'center_x': 0.5})
+
+        btn_back = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None), size=(dp(200), dp(50)),
+                          pos_hint={'center_x': 0.5})
         btn_back.bind(on_press=back_cb)
         self.add_widget(btn_back)
 
@@ -454,15 +463,16 @@ class BestiaryMenu(BoxLayout):
     def __init__(self, back_cb, **kwargs):
         super().__init__(orientation='vertical', padding=dp(20), **kwargs)
         self.add_widget(Label(text="БЕСТИАРИЙ", font_size=sp(24), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.2))
-        
+
         scroll = BoxLayout(orientation='vertical', size_hint_y=0.7)
         for m, data in MOD_DATA.items():
             row = BoxLayout(size_hint_y=None, height=dp(40))
             row.add_widget(Label(text=data["name"], color=RARITY_COLORS[data["rarity"]], font_size=sp(14)))
             scroll.add_widget(row)
         self.add_widget(scroll)
-        
-        btn_back = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None), size=(dp(200), dp(50)), pos_hint={'center_x': 0.5})
+
+        btn_back = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None), size=(dp(200), dp(50)),
+                          pos_hint={'center_x': 0.5})
         btn_back.bind(on_press=back_cb)
         self.add_widget(btn_back)
 
@@ -495,8 +505,9 @@ class SnakeApp(App):
         self.root.clear_widgets()
         self.game = GameWidget()
         self.root.add_widget(self.game)
-        
-        self.hud = Label(text="", pos_hint={'x': 0.02, 'top': 0.98}, size_hint=(0.5, 0.2), font_size=sp(14), bold=True)
+
+        self.hud = Label(text="", pos_hint={'x': 0.02, 'top': 0.98}, size_hint=(0.5, 0.2), font_size=sp(14),
+                         bold=True)
         self.root.add_widget(self.hud)
         Clock.schedule_interval(self.update_hud, 0.1)
 
