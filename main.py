@@ -15,15 +15,19 @@ import math
 import random
 import os
 import json
+import traceback
 from enum import Enum, auto
 
-# ---------- Пути для сохранений ----------
-def get_save_path():
+# ---------- Пути для сохранений и логов ----------
+def get_base_dir():
     app = App.get_running_app()
     base = app.user_data_dir if app else os.path.expanduser("~")
     try: os.makedirs(base, exist_ok=True)
     except Exception: base = os.path.expanduser("~")
-    return os.path.join(base, "save.json")
+    return base
+
+def get_save_path(): return os.path.join(get_base_dir(), "save.json")
+def get_crash_log_path(): return os.path.join(get_base_dir(), "crash_log.txt")
 
 # ---------- Константы ----------
 CELL = 28
@@ -161,12 +165,10 @@ class Snake:
             if m.mtype == ModType.BOOSTER: self.boosters = max(0, self.boosters-1)
             if m.mtype == ModType.HEAL: self.heals = max(0, self.heals-1)
 
-# ---------- Игровой виджет ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.reset()
-        # ВАЖНО: Запускаем таймер только после того, как виджет получит размеры
         self.bind(size=self._start_clock, pos=self._start_clock)
         self.menu_btns = []
         for i in range(4):
@@ -250,152 +252,168 @@ class GameWidget(Widget):
                 self.menu_btns[i].size = (btn_w, btn_h); self.menu_btns[i].pos = (x, y); self.menu_btns[i].opacity = 1
             else: self.menu_btns[i].opacity = 0
 
+    # --- ГЛАВНЫЙ ЦИКЛ С ЛОВУШКОЙ ОШИБОК ---
     def update(self, dt):
-        if self.width <= 0 or self.height <= 0: return  # Защита от нулевых размеров
-        if self.message_timer > 0: self.message_timer -= dt
-        if self.game_over or self.paused or self.show_upgrade or self.station_menu or self.reorder_mode: self.redraw(); return
-        
-        # ... (ОСТАЛЬНАЯ ЛОГИКА ИГРЫ БЕЗ ИЗМЕНЕНИЙ) ...
-        s = self.snake
-        speed = s.speed * (1 + SNAKE_SPEED_PER_BOOST * s.boosters)
-        s.head[0] += s.dir[0] * speed * dt; s.head[1] += s.dir[1] * speed * dt
-        target = s.head
-        for i in range(len(s.body)):
-            to = [target[0]-s.body[i][0], target[1]-s.body[i][1]]; d = math.hypot(*to)
-            if d > CELL: s.body[i] = [target[0]-to[0]/d*CELL, target[1]-to[1]/d*CELL]
-            target = s.body[i]
-        for m in s.modules: m.cooldown = max(0, m.cooldown-dt); m.phase += dt
-        mpos = s.module_positions()
-        for i, m in enumerate(s.modules):
-            if not m.is_gun() or m.cooldown > 0: continue
-            pos = mpos[i]
-            if m.mtype == ModType.DRONE:
-                snake_len = len(s.body) * CELL; radius = max(50, snake_len / 2)
-                nearest_e, best_d = None, float('inf')
-                for e in self.enemies:
-                    d = (s.head[0]-e.x)**2 + (s.head[1]-e.y)**2
-                    if d < best_d: best_d, nearest_e = d, e
-                target_pos = [nearest_e.x, nearest_e.y] if nearest_e else s.head
-                dir_to = [target_pos[0]-s.drone_pos[0], target_pos[1]-s.drone_pos[1]]; dl = math.hypot(*dir_to)
-                if dl > 5: s.drone_pos = [s.drone_pos[0]+dir_to[0]/dl*400*dt, s.drone_pos[1]+dir_to[1]/dl*400*dt]
-                dist_from_head = [s.drone_pos[0]-s.head[0], s.drone_pos[1]-s.head[1]]; dl2 = math.hypot(*dist_from_head)
-                if dl2 > radius: s.drone_pos = [s.head[0]+dist_from_head[0]/dl2*radius, s.head[1]+dist_from_head[1]/dl2*radius]
-                pos = s.drone_pos
-            best, target_e = None, None; rng = GUN_STATS[m.mtype][1]
-            for e in self.enemies:
-                d = (pos[0]-e.x)**2 + (pos[1]-e.y)**2
-                if d <= rng*rng and (best is None or d < best): best, target_e = d, e
-            if target_e:
-                dmg, _, cd = GUN_STATS[m.mtype]; dmg *= 1 + 0.25*(m.level-1); ang = math.atan2(target_e.y-pos[1], target_e.x-pos[0])
-                if m.mtype == ModType.GRENADE: self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*600, math.sin(ang)*600, dmg, 1.5, 6, False, True))
-                elif m.mtype == ModType.TESLA:
-                    chain = [target_e]; cur = target_e
-                    for _ in range(3):
-                        bd, nt = 150**2, None
-                        for e in self.enemies:
-                            if e not in chain:
-                                d = (cur.x-e.x)**2 + (cur.y-e.y)**2
-                                if d < bd: bd, nt = d, e
-                        if nt: chain.append(nt); cur = nt
-                        else: break
-                    for ct in chain:
-                        ct.hp -= dmg; self.lightning_lines.append((pos[0], pos[1], ct.x, ct.y, 0.1))
-                else: self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*900, math.sin(ang)*900, dmg))
-                m.cooldown = cd
-        for i, m in enumerate(s.modules):
-            if m.mtype == ModType.HEAL and m.cooldown <= 0:
-                m.cooldown = 1.5; heal = 0.5 + 0.3*m.level; s.head_hp = min(s.head_max_hp, s.head_hp+heal); mp = mpos[i]
-                for j, other in enumerate(s.modules):
-                    if other is m: continue
-                    p = mpos[j]
-                    if (mp[0]-p[0])**2 + (mp[1]-p[1])**2 <= (70+5*m.level)**2: other.hp = min(other.max_hp, other.hp+heal*0.4)
-        for i, m in enumerate(s.modules):
-            if m.mtype == ModType.AXES:
-                mp = mpos[i]; orbit = 55 + 5*m.level
-                for k in range(2):
-                    a = m.phase*3.0 + k*math.pi; ax, ay = mp[0]+math.cos(a)*orbit, mp[1]+math.sin(a)*orbit
-                    for e in self.enemies:
-                        if (ax-e.x)**2 + (ay-e.y)**2 <= (e.radius+14)**2 and m.cooldown <= 0:
-                            e.hp -= 8 + 4*m.level; dx, dy = e.x-ax, e.y-ay; dl = math.hypot(dx, dy) or 1
-                            e.x += dx/dl*18; e.y += dy/dl*18; m.cooldown = 0.25
-        for i, m in enumerate(s.modules):
-            p = mpos[i]
-            for e in self.enemies:
-                if (p[0]-e.x)**2 + (p[1]-e.y)**2 <= (e.radius+12)**2: m.hp -= e.damage*dt*0.8
-            if m.hp <= 0: s.damage_chain(i); break
-        if s.had_modules and not s.modules: self.game_over = True
-        for e in list(self.enemies):
-            ang = math.atan2(s.head[1]-e.y, s.head[0]-e.x); d = math.hypot(s.head[0]-e.x, s.head[1]-e.y)
-            if e.kind == "shooter" and d < 280: ang += math.pi
-            e.x += math.cos(ang)*e.speed*dt; e.y += math.sin(ang)*e.speed*dt
-            if e.kind == "shooter":
-                e.shoot_cd -= dt
-                if e.shoot_cd <= 0 and d < 500:
-                    e.shoot_cd = 2.0; a = math.atan2(s.head[1]-e.y, s.head[0]-e.x)
-                    self.bullets.append(Bullet(e.x, e.y, math.cos(a)*350, math.sin(a)*350, e.damage, 2.0, 5, True))
-            hit_mod = False
+        try:
+            if self.width <= 0 or self.height <= 0: return
+            if self.message_timer > 0: self.message_timer -= dt
+            if self.game_over or self.paused or self.show_upgrade or self.station_menu or self.reorder_mode: 
+                self.redraw()
+                return
+            
+            # ... (ВСЯ ЛОГИКА ИГРЫ) ...
+            s = self.snake
+            speed = s.speed * (1 + SNAKE_SPEED_PER_BOOST * s.boosters)
+            s.head[0] += s.dir[0] * speed * dt; s.head[1] += s.dir[1] * speed * dt
+            target = s.head
+            for i in range(len(s.body)):
+                to = [target[0]-s.body[i][0], target[1]-s.body[i][1]]; d = math.hypot(*to)
+                if d > CELL: s.body[i] = [target[0]-to[0]/d*CELL, target[1]-to[1]/d*CELL]
+                target = s.body[i]
+            for m in s.modules: m.cooldown = max(0, m.cooldown-dt); m.phase += dt
+            mpos = s.module_positions()
             for i, m in enumerate(s.modules):
-                if (e.x-mpos[i][0])**2 + (e.y-mpos[i][1])**2 <= (e.radius+CELL*0.5)**2:
-                    m.hp -= e.damage*dt*2.5; hit_mod = True
-                    dx, dy = e.x-mpos[i][0], e.y-mpos[i][1]; dl = math.hypot(dx,dy) or 1
-                    e.x += dx/dl*10; e.y += dy/dl*10; break
-            if not hit_mod and (e.x-s.head[0])**2 + (e.y-s.head[1])**2 <= (e.radius+CELL*0.6)**2:
-                s.head_hp -= e.damage*dt*2.5; dx, dy = e.x-s.head[0], e.y-s.head[1]; dl = math.hypot(dx,dy) or 1
-                e.x += dx/dl*10; e.y += dy/dl*10
-        if s.head_hp <= 0: self.game_over = True
-        for b in list(self.bullets):
-            b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt
-            if b.life <= 0:
-                if b.is_grenade:
-                    self.explosions.append(Explosion(b.x, b.y, 80))
+                if not m.is_gun() or m.cooldown > 0: continue
+                pos = mpos[i]
+                if m.mtype == ModType.DRONE:
+                    snake_len = len(s.body) * CELL; radius = max(50, snake_len / 2)
+                    nearest_e, best_d = None, float('inf')
                     for e in self.enemies:
-                        if (b.x-e.x)**2 + (b.y-e.y)**2 <= (80+e.radius)**2: e.hp -= b.damage
-                self.bullets.remove(b); continue
-            hit = False
-            if b.enemy:
-                if (b.x-s.head[0])**2 + (b.y-s.head[1])**2 <= (b.radius+CELL*0.6)**2: s.head_hp -= b.damage; hit = True
-                if not hit:
-                    for i, m in enumerate(s.modules):
-                        if (b.x-mpos[i][0])**2 + (b.y-mpos[i][1])**2 <= (b.radius+CELL*0.5)**2: m.hp -= b.damage; hit = True; break
-            else:
-                for e in list(self.enemies):
-                    if (b.x-e.x)**2 + (b.y-e.y)**2 <= (e.radius+b.radius)**2:
-                        if b.is_grenade:
-                            self.explosions.append(Explosion(b.x, b.y, 80))
-                            for ee in self.enemies:
-                                if (b.x-ee.x)**2 + (b.y-ee.y)**2 <= (80+ee.radius)**2: ee.hp -= b.damage
-                        else: e.hp -= b.damage
-                        hit = True; break
-            if hit: self.bullets.remove(b)
-        for e in list(self.enemies):
-            if e.hp <= 0:
-                self.enemies.remove(e); s.xp += e.reward_xp; s.money += e.reward_money
-                if s.xp >= s.xp_to_next:
-                    s.xp -= s.xp_to_next; s.level += 1; s.xp_to_next = int(s.xp_to_next*1.35+4); self.open_upgrade()
-                    if self.show_upgrade: return
-        for p in list(self.pickups):
-            touch = (p.x-s.head[0])**2 + (p.y-s.head[1])**2 <= (p.radius+CELL)**2
-            if not touch:
-                for b in s.body:
-                    if (p.x-b[0])**2 + (p.y-b[1])**2 <= (p.radius+CELL*0.7)**2: touch = True; break
-            if touch:
-                if s.add_module(p.mtype): self.pickups.remove(p); self.msg(f"+{MOD_DATA[p.mtype]['name']}")
-                else: self.msg("Лимит типа достигнут", 1.0)
-        for st in self.stations:
-            if not st.used and (st.x-s.head[0])**2 + (st.y-s.head[1])**2 <= (st.radius+CELL)**2: self.open_station(st); return
-        self.wave_timer -= dt
-        if self.wave_timer <= 0: self.spawn_wave(); self.wave_timer = max(6.0, 12.0-self.wave*0.3)
-        self.pickup_timer -= dt
-        if self.pickup_timer <= 0: self.spawn_pickup(); self.pickup_timer = random.uniform(6,11)
-        self.station_timer -= dt
-        if self.station_timer <= 0: self.spawn_station(); self.station_timer = random.uniform(30,50)
-        self.cam_x += (s.head[0] - self.width/2 - self.cam_x) * 0.15; self.cam_y += (s.head[1] - self.height/2 - self.cam_y) * 0.15
-        self.lightning_lines = [(x1,y1,x2,y2,l-dt) for x1,y1,x2,y2,l in self.lightning_lines if l > 0]
-        self.explosions = [ex for ex in self.explosions if ex.life > 0]
-        for ex in self.explosions: ex.life -= dt
-        self.redraw()
+                        d = (s.head[0]-e.x)**2 + (s.head[1]-e.y)**2
+                        if d < best_d: best_d, nearest_e = d, e
+                    target_pos = [nearest_e.x, nearest_e.y] if nearest_e else s.head
+                    dir_to = [target_pos[0]-s.drone_pos[0], target_pos[1]-s.drone_pos[1]]; dl = math.hypot(*dir_to)
+                    if dl > 5: s.drone_pos = [s.drone_pos[0]+dir_to[0]/dl*400*dt, s.drone_pos[1]+dir_to[1]/dl*400*dt]
+                    dist_from_head = [s.drone_pos[0]-s.head[0], s.drone_pos[1]-s.head[1]]; dl2 = math.hypot(*dist_from_head)
+                    if dl2 > radius: s.drone_pos = [s.head[0]+dist_from_head[0]/dl2*radius, s.head[1]+dist_from_head[1]/dl2*radius]
+                    pos = s.drone_pos
+                best, target_e = None, None; rng = GUN_STATS[m.mtype][1]
+                for e in self.enemies:
+                    d = (pos[0]-e.x)**2 + (pos[1]-e.y)**2
+                    if d <= rng*rng and (best is None or d < best): best, target_e = d, e
+                if target_e:
+                    dmg, _, cd = GUN_STATS[m.mtype]; dmg *= 1 + 0.25*(m.level-1); ang = math.atan2(target_e.y-pos[1], target_e.x-pos[0])
+                    if m.mtype == ModType.GRENADE: self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*600, math.sin(ang)*600, dmg, 1.5, 6, False, True))
+                    elif m.mtype == ModType.TESLA:
+                        chain = [target_e]; cur = target_e
+                        for _ in range(3):
+                            bd, nt = 150**2, None
+                            for e in self.enemies:
+                                if e not in chain:
+                                    d = (cur.x-e.x)**2 + (cur.y-e.y)**2
+                                    if d < bd: bd, nt = d, e
+                            if nt: chain.append(nt); cur = nt
+                            else: break
+                        for ct in chain:
+                            ct.hp -= dmg; self.lightning_lines.append((pos[0], pos[1], ct.x, ct.y, 0.1))
+                    else: self.bullets.append(Bullet(pos[0], pos[1], math.cos(ang)*900, math.sin(ang)*900, dmg))
+                    m.cooldown = cd
+            for i, m in enumerate(s.modules):
+                if m.mtype == ModType.HEAL and m.cooldown <= 0:
+                    m.cooldown = 1.5; heal = 0.5 + 0.3*m.level; s.head_hp = min(s.head_max_hp, s.head_hp+heal); mp = mpos[i]
+                    for j, other in enumerate(s.modules):
+                        if other is m: continue
+                        p = mpos[j]
+                        if (mp[0]-p[0])**2 + (mp[1]-p[1])**2 <= (70+5*m.level)**2: other.hp = min(other.max_hp, other.hp+heal*0.4)
+            for i, m in enumerate(s.modules):
+                if m.mtype == ModType.AXES:
+                    mp = mpos[i]; orbit = 55 + 5*m.level
+                    for k in range(2):
+                        a = m.phase*3.0 + k*math.pi; ax, ay = mp[0]+math.cos(a)*orbit, mp[1]+math.sin(a)*orbit
+                        for e in self.enemies:
+                            if (ax-e.x)**2 + (ay-e.y)**2 <= (e.radius+14)**2 and m.cooldown <= 0:
+                                e.hp -= 8 + 4*m.level; dx, dy = e.x-ax, e.y-ay; dl = math.hypot(dx, dy) or 1
+                                e.x += dx/dl*18; e.y += dy/dl*18; m.cooldown = 0.25
+            for i, m in enumerate(s.modules):
+                p = mpos[i]
+                for e in self.enemies:
+                    if (p[0]-e.x)**2 + (p[1]-e.y)**2 <= (e.radius+12)**2: m.hp -= e.damage*dt*0.8
+                if m.hp <= 0: s.damage_chain(i); break
+            if s.had_modules and not s.modules: self.game_over = True
+            for e in list(self.enemies):
+                ang = math.atan2(s.head[1]-e.y, s.head[0]-e.x); d = math.hypot(s.head[0]-e.x, s.head[1]-e.y)
+                if e.kind == "shooter" and d < 280: ang += math.pi
+                e.x += math.cos(ang)*e.speed*dt; e.y += math.sin(ang)*e.speed*dt
+                if e.kind == "shooter":
+                    e.shoot_cd -= dt
+                    if e.shoot_cd <= 0 and d < 500:
+                        e.shoot_cd = 2.0; a = math.atan2(s.head[1]-e.y, s.head[0]-e.x)
+                        self.bullets.append(Bullet(e.x, e.y, math.cos(a)*350, math.sin(a)*350, e.damage, 2.0, 5, True))
+                hit_mod = False
+                for i, m in enumerate(s.modules):
+                    if (e.x-mpos[i][0])**2 + (e.y-mpos[i][1])**2 <= (e.radius+CELL*0.5)**2:
+                        m.hp -= e.damage*dt*2.5; hit_mod = True
+                        dx, dy = e.x-mpos[i][0], e.y-mpos[i][1]; dl = math.hypot(dx,dy) or 1
+                        e.x += dx/dl*10; e.y += dy/dl*10; break
+                if not hit_mod and (e.x-s.head[0])**2 + (e.y-s.head[1])**2 <= (e.radius+CELL*0.6)**2:
+                    s.head_hp -= e.damage*dt*2.5; dx, dy = e.x-s.head[0], e.y-s.head[1]; dl = math.hypot(dx,dy) or 1
+                    e.x += dx/dl*10; e.y += dy/dl*10
+            if s.head_hp <= 0: self.game_over = True
+            for b in list(self.bullets):
+                b.x += b.vx*dt; b.y += b.vy*dt; b.life -= dt
+                if b.life <= 0:
+                    if b.is_grenade:
+                        self.explosions.append(Explosion(b.x, b.y, 80))
+                        for e in self.enemies:
+                            if (b.x-e.x)**2 + (b.y-e.y)**2 <= (80+e.radius)**2: e.hp -= b.damage
+                    self.bullets.remove(b); continue
+                hit = False
+                if b.enemy:
+                    if (b.x-s.head[0])**2 + (b.y-s.head[1])**2 <= (b.radius+CELL*0.6)**2: s.head_hp -= b.damage; hit = True
+                    if not hit:
+                        for i, m in enumerate(s.modules):
+                            if (b.x-mpos[i][0])**2 + (b.y-mpos[i][1])**2 <= (b.radius+CELL*0.5)**2: m.hp -= b.damage; hit = True; break
+                else:
+                    for e in list(self.enemies):
+                        if (b.x-e.x)**2 + (b.y-e.y)**2 <= (e.radius+b.radius)**2:
+                            if b.is_grenade:
+                                self.explosions.append(Explosion(b.x, b.y, 80))
+                                for ee in self.enemies:
+                                    if (b.x-ee.x)**2 + (b.y-ee.y)**2 <= (80+ee.radius)**2: ee.hp -= b.damage
+                            else: e.hp -= b.damage
+                            hit = True; break
+                if hit: self.bullets.remove(b)
+            for e in list(self.enemies):
+                if e.hp <= 0:
+                    self.enemies.remove(e); s.xp += e.reward_xp; s.money += e.reward_money
+                    if s.xp >= s.xp_to_next:
+                        s.xp -= s.xp_to_next; s.level += 1; s.xp_to_next = int(s.xp_to_next*1.35+4); self.open_upgrade()
+                        if self.show_upgrade: return
+            for p in list(self.pickups):
+                touch = (p.x-s.head[0])**2 + (p.y-s.head[1])**2 <= (p.radius+CELL)**2
+                if not touch:
+                    for b in s.body:
+                        if (p.x-b[0])**2 + (p.y-b[1])**2 <= (p.radius+CELL*0.7)**2: touch = True; break
+                if touch:
+                    if s.add_module(p.mtype): self.pickups.remove(p); self.msg(f"+{MOD_DATA[p.mtype]['name']}")
+                    else: self.msg("Лимит типа достигнут", 1.0)
+            for st in self.stations:
+                if not st.used and (st.x-s.head[0])**2 + (st.y-s.head[1])**2 <= (st.radius+CELL)**2: self.open_station(st); return
+            self.wave_timer -= dt
+            if self.wave_timer <= 0: self.spawn_wave(); self.wave_timer = max(6.0, 12.0-self.wave*0.3)
+            self.pickup_timer -= dt
+            if self.pickup_timer <= 0: self.spawn_pickup(); self.pickup_timer = random.uniform(6,11)
+            self.station_timer -= dt
+            if self.station_timer <= 0: self.spawn_station(); self.station_timer = random.uniform(30,50)
+            self.cam_x += (s.head[0] - self.width/2 - self.cam_x) * 0.15; self.cam_y += (s.head[1] - self.height/2 - self.cam_y) * 0.15
+            self.lightning_lines = [(x1,y1,x2,y2,l-dt) for x1,y1,x2,y2,l in self.lightning_lines if l > 0]
+            self.explosions = [ex for ex in self.explosions if ex.life > 0]
+            for ex in self.explosions: ex.life -= dt
+            self.redraw()
+            
+        except Exception as e:
+            # ЛОВИМ ОШИБКУ И ПИШЕМ В ФАЙЛ
+            err_msg = traceback.format_exc()
+            try:
+                with open(get_crash_log_path(), "w", encoding="utf-8") as f:
+                    f.write(err_msg)
+            except: pass
+            self.msg(f"CRASH: {str(e)}", 5.0)
+            self.paused = True
+            # Отписываемся от обновлений, чтобы не спамить ошибками
+            Clock.unschedule(self.update)
+            self.redraw()
 
-    # ... (ОСТАЛЬНЫЕ МЕТОДЫ SPWAN, REDRAW, ON_TOUCH БЕЗ ИЗМЕНЕНИЙ) ...
     def _random_ring_pos(self, rmin, rmax):
         ang = random.uniform(0, math.tau); r = random.uniform(rmin, rmax)
         return self.snake.head[0]+math.cos(ang)*r, self.snake.head[1]+math.sin(ang)*r
@@ -436,9 +454,11 @@ class GameWidget(Widget):
         dx, dy = x-cx, y-cy
         if math.hypot(dx, dy) > 30:
             l = math.hypot(dx, dy); self.snake.dir = [dx/l, dy/l]
+            
     def redraw(self):
         self.canvas.clear()
         with self.canvas:
+            # ... (КОД ОТРИСОВКИ БЕЗ ИЗМЕНЕНИЙ) ...
             Color(*COLOR_BG); Rectangle(pos=(0,0), size=(self.width, self.height))
             Color(1, 1, 1, 0.03)
             for i in range(-100, 100):
@@ -506,46 +526,27 @@ class GameWidget(Widget):
             if self.message_timer > 0:
                 lbl = CoreLabel(text=self.message, font_size=sp(20), bold=True, color=COLOR_GOLD); lbl.refresh(); Color(1,1,1); Rectangle(texture=lbl.texture, pos=(self.width/2-lbl.texture.width/2, self.height*0.85), size=lbl.texture.size)
 
-# ---------- ГЛАВНОЕ МЕНЮ (переделано на BoxLayout) ----------
 class MainMenu(BoxLayout):
     def __init__(self, start_callback, **kwargs):
         super().__init__(orientation='vertical', padding=dp(50), spacing=dp(20), **kwargs)
-        
         with self.canvas.before:
             Color(*COLOR_BG); self.bg_rect = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self.update_bg, size=self.update_bg)
-        
-        # Заголовок
         title = Label(text="ЗМЕЙКА-РОГАЛИК", font_size=sp(40), bold=True, color=COLOR_GOLD, size_hint_y=0.2)
         self.add_widget(title)
-        
-        # Пустое место для отступа
         self.add_widget(Widget(size_hint_y=0.1))
-        
-        # Кнопка Играть
-        btn_start = Button(text="ИГРАТЬ", size_hint=(None, None), size=(dp(250), dp(70)), 
-                           pos_hint={'center_x': 0.5}, background_color=(0.2, 0.7, 0.4, 1), font_size=sp(24))
+        btn_start = Button(text="ИГРАТЬ", size_hint=(None, None), size=(dp(250), dp(70)), pos_hint={'center_x': 0.5}, background_color=(0.2, 0.7, 0.4, 1), font_size=sp(24))
         btn_start.bind(on_press=start_callback)
         self.add_widget(btn_start)
-        
-        # Кнопка Выйти
-        btn_exit = Button(text="ВЫЙТИ", size_hint=(None, None), size=(dp(250), dp(70)), 
-                          pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1), font_size=sp(24))
+        btn_exit = Button(text="ВЫЙТИ", size_hint=(None, None), size=(dp(250), dp(70)), pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1), font_size=sp(24))
         btn_exit.bind(on_press=self.exit_app)
         self.add_widget(btn_exit)
-        
-        # Статистика внизу
         stats_text = f"Баланс: {PLAYER.money} $\nРекорд: {PLAYER.high_score} волн"
         stats = Label(text=stats_text, font_size=sp(14), color=COLOR_TEXT, size_hint_y=0.2)
         self.add_widget(stats)
-    
-    def update_bg(self, *args): 
-        self.bg_rect.pos = self.pos
-        self.bg_rect.size = self.size
-    def exit_app(self, instance): 
-        App.get_running_app().stop()
+    def update_bg(self, *args): self.bg_rect.pos = self.pos; self.bg_rect.size = self.size
+    def exit_app(self, instance): App.get_running_app().stop()
 
-# ---------- Приложение ----------
 class SnakeApp(App):
     def build(self):
         self.root = FloatLayout()
@@ -554,18 +555,13 @@ class SnakeApp(App):
         return self.root
 
     def start_game(self, instance):
-        if self.menu in self.root.children:
-            self.root.remove_widget(self.menu)
-        
+        if self.menu in self.root.children: self.root.remove_widget(self.menu)
         self.game = GameWidget(size_hint=(1,1), pos_hint={'x':0, 'y':0})
         self.root.add_widget(self.game)
-
         self.hud = Label(text="", pos_hint={'right': 0.98, 'top': 0.98}, size_hint=(0.4, 0.1), font_size=sp(16), bold=True, halign='right', valign='top')
         self.hud.bind(size=self.hud.setter('text_size')); self.root.add_widget(self.hud)
-
         self.module_list = Label(text="", pos_hint={'right': 0.98, 'top': 0.85}, size_hint=(0.4, 0.4), font_size=sp(12), bold=True, halign='right', valign='top')
         self.module_list.bind(size=self.module_list.setter('text_size')); self.root.add_widget(self.module_list)
-
         Clock.schedule_interval(self.update_hud, 0.1)
 
     def update_hud(self, dt):
