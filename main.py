@@ -8,7 +8,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.clock import Clock
-from kivy.graphics import Color, Ellipse, Rectangle, Line
+from kivy.graphics import Color, Ellipse, Rectangle
 from kivy.metrics import dp, sp
 import math
 import random
@@ -88,6 +88,7 @@ class Enemy:
     def __init__(self, x, y, hp, speed, radius, color, dmg):
         self.x, self.y = x, y; self.hp, self.max_hp = hp, hp
         self.speed, self.radius, self.color, self.damage = speed, radius, color, dmg
+        self.tesla_hit = 0.0
 
 class Bullet:
     def __init__(self, x, y, vx, vy, dmg, is_grenade=False, life=1.5):
@@ -122,6 +123,7 @@ class Snake:
 
     def add_mod(self, mtype):
         self.mods.append({"type": mtype, "lvl": 1, "cd": 0.0})
+        # Тело растёт ровно на 1 квадрат на каждый модуль
         last = self.body[-1] if self.body else [self.x, self.y]
         self.body.append([last[0], last[1]])
 
@@ -153,6 +155,35 @@ class UpgradeMenu(FloatLayout):
         self.bg.pos = self.pos
         self.bg.size = self.size
 
+# ---------- Меню паузы ----------
+class PauseMenu(FloatLayout):
+    def __init__(self, resume_cb, menu_cb, **kwargs):
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(0, 0, 0, 0.7)
+            self.bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self.update_bg, size=self.update_bg)
+
+        layout = BoxLayout(orientation='vertical', spacing=dp(20), padding=dp(20),
+                           size_hint=(0.6, 0.4), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+
+        title = Label(text="ПАУЗА", font_size=sp(28), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.3)
+        layout.add_widget(title)
+
+        btn_resume = Button(text="ПРОДОЛЖИТЬ", font_size=sp(18), background_color=(0.2, 0.7, 0.3, 1))
+        btn_resume.bind(on_press=resume_cb)
+        layout.add_widget(btn_resume)
+
+        btn_menu = Button(text="В ГЛАВНОЕ МЕНЮ", font_size=sp(18), background_color=(0.7, 0.3, 0.3, 1))
+        btn_menu.bind(on_press=menu_cb)
+        layout.add_widget(btn_menu)
+
+        self.add_widget(layout)
+
+    def update_bg(self, *args):
+        self.bg.pos = self.pos
+        self.bg.size = self.size
+
 # ---------- Главный Игровой Виджет ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
@@ -168,22 +199,22 @@ class GameWidget(Widget):
     def reset(self):
         self.snake = Snake()
         self.enemies, self.bullets, self.pickups = [], [], []
-        self.explosions, self.lightning = [], []
+        self.explosions = []
         self.wave, self.wave_timer = 0, 3.0
         self.pickup_timer = 6.0
         self.game_over, self.upgrading, self.paused = False, False, False
         self.upg_opts = []
 
     def update(self, dt):
-        # --- ЭФФЕКТЫ (обновляются всегда) ---
+        # Эффекты
         for ex in self.explosions[:]:
             ex.life -= dt
             if ex.life <= 0:
                 self.explosions.remove(ex)
-        for l in self.lightning[:]:
-            l[4] -= dt
-            if l[4] <= 0:
-                self.lightning.remove(l)
+        # Сброс "удара Теслой"
+        for e in self.enemies:
+            if e.tesla_hit > 0:
+                e.tesla_hit -= dt
 
         if self.game_over or self.upgrading or self.paused or self.width <= 0:
             self.redraw()
@@ -204,7 +235,7 @@ class GameWidget(Widget):
                 s.body[i][1] = ty - (dy / d) * CELL
             tx, ty = s.body[i][0], s.body[i][1]
 
-        # --- ДРОН ---
+        # Дрон
         drone_active = any(m["type"] == ModType.DRONE for m in s.mods)
         if drone_active:
             s.drone_angle += dt * 2.0
@@ -212,14 +243,12 @@ class GameWidget(Widget):
             s.drone_x = s.x + math.cos(s.drone_angle) * orbit_r
             s.drone_y = s.y + math.sin(s.drone_angle) * orbit_r
 
-        # --- СТРЕЛЬБА МОДУЛЕЙ ---
+        # Стрельба
         for i in range(min(len(s.mods), len(s.body))):
             m = s.mods[i]
             m["cd"] = max(0.0, m["cd"] - dt)
             if m["type"] in GUN_STATS and m["cd"] <= 0:
                 mx, my = s.body[i][0], s.body[i][1]
-
-                # Дрон стреляет со своей позиции
                 if m["type"] == ModType.DRONE:
                     mx, my = s.drone_x, s.drone_y
 
@@ -235,7 +264,7 @@ class GameWidget(Widget):
                     dmg_lvl = dmg * (1 + 0.2 * m["lvl"])
 
                     if m["type"] == ModType.TESLA:
-                        # Цепочка до 4 целей
+                        # Цепочка
                         chain = [target_enemy]
                         cur = target_enemy
                         for _ in range(3):
@@ -246,64 +275,42 @@ class GameWidget(Widget):
                                 if d2 < bd:
                                     bd, nt = d2, e
                             if nt:
-                                chain.append(nt)
-                                cur = nt
-                            else:
-                                break
+                                chain.append(nt); cur = nt
+                            else: break
                         for ct in chain:
                             ct.hp -= dmg_lvl
-                        # визуальная молния
-                        if chain:
-                            pts = [(mx, my)]
-                            for ct in chain:
-                                pts.append((ct.x, ct.y))
-                            self.lightning.append([pts, 0.15])
+                            ct.tesla_hit = 0.15  # маркер на 0.15 сек
                     elif m["type"] == ModType.GRENADE:
-                        # Снаряд-граната
                         if len(self.bullets) < MAX_BULLETS:
-                            self.bullets.append(Bullet(mx, my,
-                                                       math.cos(ang) * 500,
-                                                       math.sin(ang) * 500,
-                                                       dmg_lvl, is_grenade=True, life=1.2))
+                            self.bullets.append(Bullet(mx, my, math.cos(ang)*500, math.sin(ang)*500, dmg_lvl, True, 1.2))
                     else:
                         if len(self.bullets) < MAX_BULLETS:
-                            self.bullets.append(Bullet(mx, my,
-                                                       math.cos(ang) * 700,
-                                                       math.sin(ang) * 700,
-                                                       dmg_lvl))
+                            self.bullets.append(Bullet(mx, my, math.cos(ang)*700, math.sin(ang)*700, dmg_lvl))
                     m["cd"] = cd
 
-        # --- ПУЛИ ---
+        # Пули
         for b in self.bullets[:]:
-            b.x += b.vx * dt
-            b.y += b.vy * dt
-            b.life -= dt
-
+            b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt
             hit = False
             for e in self.enemies[:]:
                 if (b.x - e.x)**2 + (b.y - e.y)**2 < (e.radius + 8)**2:
                     if b.is_grenade:
-                        # Взрыв
                         self.explosions.append(Explosion(b.x, b.y, 90, 0.4))
                         for ee in self.enemies[:]:
                             if (b.x - ee.x)**2 + (b.y - ee.y)**2 < 90**2:
                                 ee.hp -= b.dmg
                     else:
                         e.hp -= b.dmg
-                    hit = True
-                    break
-
+                    hit = True; break
             if hit or b.life <= 0 or (b.x - s.x)**2 + (b.y - s.y)**2 > 1500**2:
                 if b.is_grenade and not hit:
-                    # Граната упала сама — взрыв
                     self.explosions.append(Explosion(b.x, b.y, 90, 0.4))
                     for ee in self.enemies[:]:
                         if (b.x - ee.x)**2 + (b.y - ee.y)**2 < 90**2:
                             ee.hp -= b.dmg
-                if b in self.bullets:
-                    self.bullets.remove(b)
+                if b in self.bullets: self.bullets.remove(b)
 
-        # --- ВРАГИ ---
+        # Враги
         for e in self.enemies[:]:
             ang = math.atan2(s.y - e.y, s.x - e.x)
             e.x += math.cos(ang) * e.speed * dt
@@ -312,8 +319,7 @@ class GameWidget(Widget):
                 s.hp -= e.damage * dt * 2.0
             if e.hp <= 0:
                 self.enemies.remove(e)
-                s.money += 5
-                s.xp += 3
+                s.money += 5; s.xp += 3
                 if s.xp >= s.xp_next:
                     s.xp -= s.xp_next
                     s.level += 1
@@ -321,35 +327,27 @@ class GameWidget(Widget):
                     self.open_upgrade()
                     return
 
-        # --- ПОДБОР ---
+        # Пикапы
         for p in self.pickups[:]:
             if (p.x - s.x)**2 + (p.y - s.y)**2 < (20 + 15)**2:
                 self.pickups.remove(p)
                 s.add_mod(p.mtype)
 
-        # --- ТАЙМЕРЫ ---
+        # Таймеры
         self.wave_timer -= dt
         if self.wave_timer <= 0:
-            self.wave += 1
-            self.wave_timer = 15.0
+            self.wave += 1; self.wave_timer = 15.0
             if len(self.enemies) < MAX_ENEMIES:
-                count = min(3 + self.wave, 10)
-                for _ in range(count):
-                    a = random.uniform(0, math.tau)
-                    r = random.uniform(350, 600)
-                    ex = s.x + math.cos(a) * r
-                    ey = s.y + math.sin(a) * r
-                    hp = 10 + self.wave * 5
-                    spd = 50 + self.wave * 3
+                for _ in range(min(3 + self.wave, 10)):
+                    a = random.uniform(0, math.tau); r = random.uniform(350, 600)
+                    ex = s.x + math.cos(a) * r; ey = s.y + math.sin(a) * r
+                    hp = 10 + self.wave * 5; spd = 50 + self.wave * 3
                     self.enemies.append(Enemy(ex, ey, hp, spd, 15, (1, 0.3, 0.3), 10))
 
         self.pickup_timer -= dt
         if self.pickup_timer <= 0 and len(self.pickups) < MAX_PICKUPS:
-            a = random.uniform(0, math.tau)
-            r = random.uniform(150, 400)
-            px = s.x + math.cos(a) * r
-            py = s.y + math.sin(a) * r
-            self.pickups.append(Pickup(px, py, random.choice(list(ModType))))
+            a = random.uniform(0, math.tau); r = random.uniform(150, 400)
+            self.pickups.append(Pickup(s.x + math.cos(a)*r, s.y + math.sin(a)*r, random.choice(list(ModType))))
             self.pickup_timer = 10.0
 
         if s.hp <= 0:
@@ -359,37 +357,52 @@ class GameWidget(Widget):
 
     def open_upgrade(self):
         self.upgrading = True
-        available_mods = list(ModType)
-        self.upg_opts = random.sample(available_mods, min(3, len(available_mods)))
+        self.upg_opts = random.sample(list(ModType), min(3, len(ModType)))
         app = App.get_running_app()
-        menu = UpgradeMenu(options=self.upg_opts, callback=self.apply_upgrade)
-        app.root.add_widget(menu)
+        app.root.add_widget(UpgradeMenu(options=self.upg_opts, callback=self.apply_upgrade))
 
     def apply_upgrade(self, idx):
         app = App.get_running_app()
         for child in app.root.children[:]:
             if isinstance(child, UpgradeMenu):
                 app.root.remove_widget(child)
-
         if 0 <= idx < len(self.upg_opts):
             t = self.upg_opts[idx]
             s = self.snake
             found = False
             for m in s.mods:
                 if m["type"] == t:
-                    m["lvl"] += 1
-                    found = True
-                    break
+                    m["lvl"] += 1; found = True; break
             if not found:
                 s.add_mod(t)
-
         self.upgrading = False
         self.redraw()
 
     def toggle_pause(self, inst):
-        if not self.game_over and not self.upgrading:
-            self.paused = not self.paused
-            self.redraw()
+        if self.game_over or self.upgrading:
+            return
+        self.paused = not self.paused
+        app = App.get_running_app()
+        
+        # Удалить старое меню, если есть
+        for child in app.root.children[:]:
+            if isinstance(child, PauseMenu):
+                app.root.remove_widget(child)
+        
+        if self.paused:
+            def resume(inst):
+                self.paused = False
+                for c in app.root.children[:]:
+                    if isinstance(c, PauseMenu): app.root.remove_widget(c)
+                self.redraw()
+
+            def to_menu(inst):
+                for c in app.root.children[:]:
+                    if isinstance(c, PauseMenu): app.root.remove_widget(c)
+                app.stop_game()
+
+            app.root.add_widget(PauseMenu(resume_cb=resume, menu_cb=to_menu))
+        self.redraw()
 
     def redraw(self):
         self.canvas.clear()
@@ -406,6 +419,11 @@ class GameWidget(Widget):
                 if -50 < sx < self.width + 50 and -50 < sy < self.height + 50:
                     Color(*e.color)
                     Ellipse(pos=(sx - e.radius, sy - e.radius), size=(e.radius * 2, e.radius * 2))
+                    # Маркер удара Теслы
+                    if e.tesla_hit > 0:
+                        Color(0.6, 1, 1, 0.8)
+                        r = e.radius + 8
+                        Ellipse(pos=(sx - r, sy - r), size=(r*2, r*2))
 
             # Пикапы
             for p in self.pickups:
@@ -434,17 +452,6 @@ class GameWidget(Widget):
                         Color(1, 0.9, 0.2)
                         Ellipse(pos=(sx - 4, sy - 4), size=(8, 8))
 
-            # Молнии
-            for item in self.lightning:
-                pts, _ = item
-                screen_pts = []
-                for p in pts:
-                    sx, sy = scr(p[0], p[1])
-                    screen_pts.extend([sx, sy])
-                if len(screen_pts) >= 4:
-                    Color(0.5, 1, 1)
-                    Line(points=screen_pts, width=2)
-
             # Змея
             s = self.snake
             c_head, c_body = (0.2, 0.8, 0.4), (0.1, 0.6, 0.3)
@@ -463,8 +470,7 @@ class GameWidget(Widget):
 
             # Модули
             for i, m in enumerate(s.mods):
-                if m["type"] == ModType.DRONE:
-                    continue  # Дрон рисуем отдельно
+                if m["type"] == ModType.DRONE: continue
                 if i < len(s.body):
                     mx, my = scr(s.body[i][0], s.body[i][1])
                     if -50 < mx < self.width + 50 and -50 < my < self.height + 50:
@@ -488,15 +494,9 @@ class GameWidget(Widget):
             Color(0.8, 0.8, 0.2)
             Ellipse(pos=(jx + s.dx * r * 0.6 - 15, jy + s.dy * r * 0.6 - 15), size=(30, 30))
 
-            # Пауза — затемнение
-            if self.paused:
-                Color(0, 0, 0, 0.6)
-                Rectangle(pos=(0, 0), size=(self.width, self.height))
-
     def on_touch_down(self, touch):
-        if self.upgrading or self.game_over:
+        if self.upgrading or self.game_over or self.paused:
             return super().on_touch_down(touch)
-
         jx, jy = self.width * 0.85, self.height * 0.15
         if (touch.x - jx)**2 + (touch.y - jy)**2 < (min(self.width, self.height) * 0.15)**2:
             touch.ud['joy'] = True
@@ -518,25 +518,14 @@ class GameWidget(Widget):
 class MainMenu(BoxLayout):
     def __init__(self, start_cb, shop_cb, **kwargs):
         super().__init__(orientation='vertical', padding=dp(30), spacing=dp(15), **kwargs)
-
-        title = Label(text="ЗМЕЙКА-РОГАЛИК", font_size=sp(30), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.3)
-        self.add_widget(title)
-
-        btn_play = Button(text="ИГРАТЬ", font_size=sp(20), size_hint=(None, None),
-                          size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
-        btn_play.bind(on_press=start_cb)
-        self.add_widget(btn_play)
-
-        btn_shop = Button(text="МАГАЗИН", font_size=sp(20), size_hint=(None, None),
-                          size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
-        btn_shop.bind(on_press=shop_cb)
-        self.add_widget(btn_shop)
-
-        btn_exit = Button(text="ВЫЙТИ", font_size=sp(20), size_hint=(None, None),
-                          size=(dp(250), dp(60)), pos_hint={'center_x': 0.5},
-                          background_color=(0.8, 0.2, 0.2, 1))
-        btn_exit.bind(on_press=App.get_running_app().stop)
-        self.add_widget(btn_exit)
+        self.add_widget(Label(text="ЗМЕЙКА-РОГАЛИК", font_size=sp(30), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.3))
+        b = Button(text="ИГРАТЬ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
+        b.bind(on_press=start_cb); self.add_widget(b)
+        b = Button(text="МАГАЗИН", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
+        b.bind(on_press=shop_cb); self.add_widget(b)
+        b = Button(text="ВЫЙТИ", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)),
+                   pos_hint={'center_x': 0.5}, background_color=(0.8, 0.2, 0.2, 1))
+        b.bind(on_press=App.get_running_app().stop); self.add_widget(b)
 
 class ShopMenu(BoxLayout):
     def __init__(self, back_cb, **kwargs):
@@ -545,48 +534,37 @@ class ShopMenu(BoxLayout):
 
         row1 = BoxLayout(size_hint_y=0.2)
         row1.add_widget(Label(text="Змея:", font_size=sp(16)))
-        btn_s1 = Button(text="Зеленая", font_size=sp(14)); btn_s1.bind(on_press=lambda x: self.buy_skin(0, 0))
-        btn_s2 = Button(text="Красная (100)", font_size=sp(14)); btn_s2.bind(on_press=lambda x: self.buy_skin(1, 100))
-        btn_s3 = Button(text="Синяя (100)", font_size=sp(14)); btn_s3.bind(on_press=lambda x: self.buy_skin(2, 100))
-        row1.add_widget(btn_s1); row1.add_widget(btn_s2); row1.add_widget(btn_s3)
+        for name, sid, cost in [("Зеленая",0,0), ("Красная (100)",1,100), ("Синяя (100)",2,100)]:
+            b = Button(text=name, font_size=sp(14))
+            b.bind(on_press=lambda x, s=sid, c=cost: self.buy_skin(s, c))
+            row1.add_widget(b)
         self.add_widget(row1)
 
         row2 = BoxLayout(size_hint_y=0.2)
         row2.add_widget(Label(text="Улучшения:", font_size=sp(16)))
-        btn_u1 = Button(text="Скорость (200)", font_size=sp(14)); btn_u1.bind(on_press=self.buy_upg_legs)
-        btn_u2 = Button(text="HP (300)", font_size=sp(14)); btn_u2.bind(on_press=self.buy_upg_skin)
-        row2.add_widget(btn_u1); row2.add_widget(btn_u2)
+        b = Button(text="Скорость (200)", font_size=sp(14)); b.bind(on_press=self.buy_upg_legs)
+        row2.add_widget(b)
+        b = Button(text="HP (300)", font_size=sp(14)); b.bind(on_press=self.buy_upg_skin)
+        row2.add_widget(b)
         self.add_widget(row2)
 
         self.add_widget(Widget(size_hint_y=0.2))
-
-        btn_back = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None),
-                          size=(dp(200), dp(50)), pos_hint={'center_x': 0.5})
-        btn_back.bind(on_press=back_cb)
-        self.add_widget(btn_back)
+        b = Button(text="НАЗАД", font_size=sp(20), size_hint=(None, None), size=(dp(200), dp(50)), pos_hint={'center_x': 0.5})
+        b.bind(on_press=back_cb); self.add_widget(b)
 
     def buy_skin(self, sid, cost):
         if sid not in PLAYER.owned_snake_skins and PLAYER.money >= cost:
-            PLAYER.money -= cost
-            PLAYER.owned_snake_skins.append(sid)
-        if sid in PLAYER.owned_snake_skins:
-            PLAYER.snake_skin = sid
-        PLAYER.save()
-        App.get_running_app().update_shop_ui()
+            PLAYER.money -= cost; PLAYER.owned_snake_skins.append(sid)
+        if sid in PLAYER.owned_snake_skins: PLAYER.snake_skin = sid
+        PLAYER.save(); App.get_running_app().update_shop_ui()
 
     def buy_upg_legs(self, inst):
         if not PLAYER.upg_legs and PLAYER.money >= 200:
-            PLAYER.money -= 200
-            PLAYER.upg_legs = True
-            PLAYER.save()
-            App.get_running_app().update_shop_ui()
+            PLAYER.money -= 200; PLAYER.upg_legs = True; PLAYER.save(); App.get_running_app().update_shop_ui()
 
     def buy_upg_skin(self, inst):
         if not PLAYER.upg_skin and PLAYER.money >= 300:
-            PLAYER.money -= 300
-            PLAYER.upg_skin = True
-            PLAYER.save()
-            App.get_running_app().update_shop_ui()
+            PLAYER.money -= 300; PLAYER.upg_skin = True; PLAYER.save(); App.get_running_app().update_shop_ui()
 
 # ---------- Приложение ----------
 class SnakeApp(App):
@@ -597,13 +575,11 @@ class SnakeApp(App):
 
     def show_menu(self):
         self.root.clear_widgets()
-        self.menu = MainMenu(start_cb=self.start_game, shop_cb=self.show_shop)
-        self.root.add_widget(self.menu)
+        self.root.add_widget(MainMenu(start_cb=self.start_game, shop_cb=self.show_shop))
 
     def show_shop(self, inst):
         self.root.clear_widgets()
-        self.shop = ShopMenu(back_cb=lambda x: self.show_menu())
-        self.root.add_widget(self.shop)
+        self.root.add_widget(ShopMenu(back_cb=lambda x: self.show_menu()))
 
     def update_shop_ui(self):
         self.show_shop(None)
@@ -624,10 +600,19 @@ class SnakeApp(App):
 
         Clock.schedule_interval(self.update_hud, 0.1)
 
+    def stop_game(self):
+        """Выход из игры в главное меню."""
+        if hasattr(self, 'game') and self.game:
+            PLAYER.money += self.game.snake.money
+            if self.game.wave > PLAYER.high_score:
+                PLAYER.high_score = self.game.wave
+            PLAYER.save()
+        Clock.unschedule(self.update_hud)
+        self.show_menu()
+
     def update_hud(self, dt):
         if hasattr(self, 'game') and self.game:
-            g = self.game
-            s = g.snake
+            g = self.game; s = g.snake
             status = "ПАУЗА" if g.paused else ""
             self.hud.text = f"HP: {int(s.hp)}/{s.max_hp}\nУр: {s.level} | Волна: {g.wave}\n$: {s.money} {status}"
 
