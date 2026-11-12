@@ -19,9 +19,12 @@ from enum import Enum, auto
 # ---------- Сохранения ----------
 def get_save_path():
     app = App.get_running_app()
-    base = app.user_data_dir if app else os.path.expanduser("~")
+    if app:
+        base = app.user_data_dir
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
     try: os.makedirs(base, exist_ok=True)
-    except: base = os.path.expanduser("~")
+    except: base = "/sdcard"
     return os.path.join(base, "save.json")
 
 class PlayerData:
@@ -56,10 +59,11 @@ class PlayerData:
         try:
             with open(get_save_path(), "w", encoding="utf-8") as f:
                 json.dump(d, f)
+            print("SAVED to", get_save_path())
         except Exception as e:
             print("SAVE ERR:", e)
 
-PLAYER = PlayerData()
+PLAYER = None # Создадим в App.build()
 
 # ---------- Данные ----------
 class ModType(Enum):
@@ -81,7 +85,6 @@ GUN_STATS = {
     ModType.PISTOL: (12, 340, 0.55), ModType.RIFLE: (6, 300, 0.13), ModType.SNIPER: (40, 620, 1.4),
     ModType.TESLA: (15, 250, 0.8), ModType.GRENADE: (30, 400, 1.2), ModType.DRONE: (8, 300, 0.4)
 }
-RARITY_COLORS = {1: (0.8, 0.8, 0.8), 2: (0.4, 0.8, 1), 3: (0.7, 0.4, 1), 4: (1, 0.4, 0.8), 5: (1, 0.8, 0.2)}
 
 CELL = 25
 MAX_BULLETS = 60
@@ -138,6 +141,62 @@ class Snake:
         last = self.body[-1] if self.body else [self.x, self.y]
         self.body.append([last[0], last[1]])
 
+# ---------- Меню станции ----------
+class StationMenu(FloatLayout):
+    def __init__(self, game_ref, **kwargs):
+        super().__init__(**kwargs)
+        self.game_ref = game_ref
+        with self.canvas.before:
+            Color(0, 0, 0, 0.75); self.bg = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self.update_bg, size=self.update_bg)
+        
+        layout = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20),
+                           size_hint=(0.8, 0.7), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        layout.add_widget(Label(text="СТАНЦИЯ", font_size=sp(24), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.2))
+        
+        # 1. Восстановить модули
+        lost_count = len(game_ref.snake.lost_mods)
+        btn1 = Button(text=f"Восстановить модули ({lost_count * 8}$)", font_size=sp(16), size_hint_y=0.2)
+        btn1.bind(on_press=self.repair)
+        layout.add_widget(btn1)
+        
+        # 2. Лечение
+        btn2 = Button(text="Лечение (25% HP)", font_size=sp(16), size_hint_y=0.2)
+        btn2.bind(on_press=self.heal)
+        layout.add_widget(btn2)
+        
+        # 3. Выйти
+        btn3 = Button(text="Выйти", font_size=sp(16), size_hint_y=0.2, background_color=(0.7, 0.3, 0.3, 1))
+        btn3.bind(on_press=self.close)
+        layout.add_widget(btn3)
+        
+        self.add_widget(layout)
+
+    def repair(self, inst):
+        s = self.game_ref.snake
+        cost = len(s.lost_mods) * 8
+        if s.money >= cost and cost > 0:
+            s.money -= cost
+            for mtype in s.lost_mods:
+                s.add_mod(mtype)
+            s.lost_mods.clear()
+            self.game_ref.toast("Модули восстановлены!")
+        else:
+            self.game_ref.toast("Недостаточно денег или нет потерянных модулей")
+        self.close()
+
+    def heal(self, inst):
+        s = self.game_ref.snake
+        s.hp = min(s.max_hp, s.hp + s.max_hp * 0.25)
+        self.game_ref.toast("HP восстановлено на 25%")
+        self.close()
+
+    def close(self, inst=None):
+        App.get_running_app().root.remove_widget(self)
+        self.game_ref.station_menu_open = False
+
+    def update_bg(self, *a): self.bg.pos = self.pos; self.bg.size = self.size
+
 # ---------- Меню улучшений ----------
 class UpgradeMenu(FloatLayout):
     def __init__(self, options, callback, **kwargs):
@@ -171,7 +230,6 @@ class PauseMenu(FloatLayout):
         self.add_widget(layout)
     def update_bg(self, *a): self.bg.pos = self.pos; self.bg.size = self.size
 
-# ---------- Меню проигрыша ----------
 class GameOverMenu(FloatLayout):
     def __init__(self, restart_cb, menu_cb, **kwargs):
         super().__init__(**kwargs)
@@ -186,7 +244,7 @@ class GameOverMenu(FloatLayout):
         self.add_widget(layout)
     def update_bg(self, *a): self.bg.pos = self.pos; self.bg.size = self.size
 
-# ---------- Главный игровой виджет ----------
+# ---------- Игровой виджет ----------
 class GameWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -206,8 +264,12 @@ class GameWidget(Widget):
         self.wave, self.wave_timer = 0, 3.0
         self.pickup_timer, self.station_timer = 6.0, 20.0
         self.game_over, self.upgrading, self.paused = False, False, False
+        self.station_menu_open = False
         self.upg_opts = []
         self.autosave_t = 0.0
+
+    def toast(self, text):
+        App.get_running_app().toast(text)
 
     def update(self, dt):
         for ex in self.explosions[:]:
@@ -227,7 +289,7 @@ class GameWidget(Widget):
             PLAYER.save()
             self.autosave_t = 0.0
 
-        if self.game_over or self.upgrading or self.paused or self.width <= 0:
+        if self.game_over or self.upgrading or self.paused or self.station_menu_open or self.width <= 0:
             self.redraw(); return
 
         s = self.snake
@@ -350,6 +412,7 @@ class GameWidget(Widget):
             if (p.x - s.x)**2 + (p.y - s.y)**2 < (20 + 15)**2:
                 self.pickups.remove(p); s.add_mod(p.mtype)
 
+        # СТАНЦИИ (открывают меню)
         for st in self.stations:
             if st.used: continue
             hit = False
@@ -359,9 +422,10 @@ class GameWidget(Widget):
                     if (st.x - bb[0])**2 + (st.y - bb[1])**2 < (40 + CELL)**2: hit = True; break
             if hit:
                 st.used = True
-                s.hp = min(s.max_hp, s.hp + s.max_hp * 0.5)
-                for m in s.mods: m["hp"] = m["max_hp"]
-                break
+                self.station_menu_open = True
+                app = App.get_running_app()
+                app.root.add_widget(StationMenu(game_ref=self))
+                return
 
         self.wave_timer -= dt
         if self.wave_timer <= 0:
@@ -413,12 +477,10 @@ class GameWidget(Widget):
                 if m["type"] == t:
                     m["lvl"] += 1; m["hp"] = m["max_hp"] * 1.2; m["max_hp"] *= 1.2; found = True; break
             if not found: s.add_mod(t)
-        self.upgrading = False
-        PLAYER.save()
-        self.redraw()
+        self.upgrading = False; self.redraw()
 
     def toggle_pause(self, inst):
-        if self.game_over or self.upgrading: return
+        if self.game_over or self.upgrading or self.station_menu_open: return
         self.paused = not self.paused
         app = App.get_running_app()
         for ch in app.root.children[:]:
@@ -446,8 +508,6 @@ class GameWidget(Widget):
                 if -50 < sx < self.width+50 and -50 < sy < self.height+50:
                     Color(1, 0.8, 0.2); Ellipse(pos=(sx-20, sy-20), size=(40, 40))
                     Color(0.5, 0.3, 0); Line(circle=(sx, sy, 20), width=2)
-                    Color(1, 0.8, 0.2); Rectangle(pos=(sx-3, sy-15), size=(6, 30))
-                    Rectangle(pos=(sx-15, sy-3), size=(30, 6))
 
             for e in self.enemies:
                 sx, sy = scr(e.x, e.y)
@@ -513,7 +573,6 @@ class GameWidget(Widget):
                         ang = t + k * math.pi
                         ax = mx + math.cos(ang) * 40; ay = my + math.sin(ang) * 40
                         Color(0.7, 0.7, 0.7); Ellipse(pos=(ax-8, ay-8), size=(16, 16))
-                        Color(0.5, 0.35, 0.1); Ellipse(pos=(ax-4, ay-4), size=(8, 8))
 
                 if m["type"] == ModType.SHIELD:
                     t = Clock.get_boottime() * 2.5
@@ -535,7 +594,7 @@ class GameWidget(Widget):
             Color(0.8, 0.8, 0.2); Ellipse(pos=(jx+s.dx*r*0.6-15, jy+s.dy*r*0.6-15), size=(30, 30))
 
     def on_touch_down(self, touch):
-        if self.upgrading or self.game_over or self.paused: return super().on_touch_down(touch)
+        if self.upgrading or self.game_over or self.paused or self.station_menu_open: return super().on_touch_down(touch)
         jx, jy = self.width * 0.85, self.height * 0.15
         if (touch.x-jx)**2 + (touch.y-jy)**2 < (min(self.width, self.height)*0.15)**2:
             touch.ud['joy'] = True; return True
@@ -562,7 +621,6 @@ class MainMenu(BoxLayout):
         b = Button(text="МАГАЗИН", font_size=sp(20), size_hint=(None, None), size=(dp(250), dp(60)), pos_hint={'center_x': 0.5})
         b.bind(on_press=shop_cb); self.add_widget(b)
 
-        # НОВАЯ КНОПКА СОХРАНЕНИЯ
         b = Button(text="СОХРАНИТЬ ПРОГРЕСС", font_size=sp(16), size_hint=(None, None), size=(dp(250), dp(50)), pos_hint={'center_x': 0.5}, background_color=(0.2, 0.5, 0.7, 1))
         b.bind(on_press=save_cb); self.add_widget(b)
 
@@ -604,9 +662,25 @@ class ShopMenu(BoxLayout):
 # ---------- App ----------
 class SnakeApp(App):
     def build(self):
+        global PLAYER
+        PLAYER = PlayerData()
         self.root = FloatLayout()
         self.show_menu()
         return self.root
+
+    def toast(self, text):
+        if hasattr(self, 'toast_lbl'):
+            try: self.root.remove_widget(self.toast_lbl)
+            except: pass
+        self.toast_lbl = Label(text=text, pos_hint={'center_x': 0.5, 'top': 0.9},
+                               font_size=sp(16), color=(0.2, 1, 0.2), bold=True)
+        self.root.add_widget(self.toast_lbl)
+        Clock.schedule_once(lambda dt: self._remove_toast(), 2.5)
+
+    def _remove_toast(self):
+        if hasattr(self, 'toast_lbl'):
+            try: self.root.remove_widget(self.toast_lbl)
+            except: pass
 
     def show_menu(self):
         self.root.clear_widgets()
@@ -614,13 +688,7 @@ class SnakeApp(App):
 
     def manual_save(self, inst):
         PLAYER.save()
-        # Показываем всплывающее уведомление
-        if hasattr(self, 'toast'):
-            self.root.remove_widget(self.toast)
-        self.toast = Label(text="ПРОГРЕСС СОХРАНЁН!", pos_hint={'center_x': 0.5, 'top': 0.95},
-                           font_size=sp(18), color=(0.2, 1, 0.2), bold=True)
-        self.root.add_widget(self.toast)
-        Clock.schedule_once(lambda dt: self.root.remove_widget(self.toast), 2.0)
+        self.toast("ПРОГРЕСС СОХРАНЁН!")
 
     def show_shop(self, inst):
         self.root.clear_widgets()
@@ -634,7 +702,6 @@ class SnakeApp(App):
         self.game = GameWidget()
         self.root.add_widget(self.game)
 
-        # HUD справа сверху — список модулей
         self.hud = Label(text="", pos_hint={'right': 0.98, 'top': 0.98},
                          size_hint=(0.45, 0.45), font_size=sp(12), bold=True,
                          halign='right', valign='top')
@@ -661,7 +728,9 @@ class SnakeApp(App):
 
     def stop_game(self):
         if hasattr(self, 'game') and self.game:
-            PLAYER.money += self.game.snake.money
+            if self.game.snake.money > 0:
+                PLAYER.money += self.game.snake.money
+                self.game.snake.money = 0
             if self.game.wave > PLAYER.high_score: PLAYER.high_score = self.game.wave
             PLAYER.save()
         try: Clock.unschedule(self.update_hud)
@@ -680,7 +749,9 @@ class SnakeApp(App):
 
     def on_stop(self):
         if hasattr(self, 'game') and self.game:
-            PLAYER.money += self.game.snake.money
+            if self.game.snake.money > 0:
+                PLAYER.money += self.game.snake.money
+                self.game.snake.money = 0
             if self.game.wave > PLAYER.high_score: PLAYER.high_score = self.game.wave
         PLAYER.save()
 
