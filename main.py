@@ -59,7 +59,6 @@ class PlayerData:
         try:
             with open(get_save_path(), "w", encoding="utf-8") as f:
                 json.dump(d, f)
-            print("SAVED to", get_save_path())
         except Exception as e:
             print("SAVE ERR:", e)
 
@@ -151,49 +150,33 @@ class StationMenu(FloatLayout):
         self.bind(pos=self.update_bg, size=self.update_bg)
         
         layout = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20),
-                           size_hint=(0.8, 0.7), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+                           size_hint=(0.8, 0.6), pos_hint={'center_x': 0.5, 'center_y': 0.5})
         layout.add_widget(Label(text="СТАНЦИЯ", font_size=sp(24), bold=True, color=(1, 0.8, 0.2), size_hint_y=0.2))
         
-        # 1. Восстановить модули
-        lost_count = len(game_ref.snake.lost_mods)
-        btn1 = Button(text=f"Восстановить модули ({lost_count * 8}$)", font_size=sp(16), size_hint_y=0.2)
-        btn1.bind(on_press=self.repair)
+        btn1 = Button(text="Лечение (25% HP)", font_size=sp(16), size_hint_y=0.25)
+        btn1.bind(on_press=self.heal)
         layout.add_widget(btn1)
         
-        # 2. Лечение
-        btn2 = Button(text="Лечение (25% HP)", font_size=sp(16), size_hint_y=0.2)
-        btn2.bind(on_press=self.heal)
+        btn2 = Button(text="Выйти", font_size=sp(16), size_hint_y=0.25, background_color=(0.7, 0.3, 0.3, 1))
+        btn2.bind(on_press=self.close)
         layout.add_widget(btn2)
         
-        # 3. Выйти
-        btn3 = Button(text="Выйти", font_size=sp(16), size_hint_y=0.2, background_color=(0.7, 0.3, 0.3, 1))
-        btn3.bind(on_press=self.close)
-        layout.add_widget(btn3)
-        
         self.add_widget(layout)
-
-    def repair(self, inst):
-        s = self.game_ref.snake
-        cost = len(s.lost_mods) * 8
-        if s.money >= cost and cost > 0:
-            s.money -= cost
-            for mtype in s.lost_mods:
-                s.add_mod(mtype)
-            s.lost_mods.clear()
-            self.game_ref.toast("Модули восстановлены!")
-        else:
-            self.game_ref.toast("Недостаточно денег или нет потерянных модулей")
-        self.close()
 
     def heal(self, inst):
         s = self.game_ref.snake
         s.hp = min(s.max_hp, s.hp + s.max_hp * 0.25)
-        self.game_ref.toast("HP восстановлено на 25%")
+        for m in s.mods:
+            m["hp"] = min(m["max_hp"], m["hp"] + m["max_hp"] * 0.5)
+        App.get_running_app().toast("HP восстановлено!")
         self.close()
 
     def close(self, inst=None):
-        App.get_running_app().root.remove_widget(self)
+        try:
+            App.get_running_app().root.remove_widget(self)
+        except Exception: pass
         self.game_ref.station_menu_open = False
+        self.game_ref.paused = False
 
     def update_bg(self, *a): self.bg.pos = self.pos; self.bg.size = self.size
 
@@ -230,6 +213,7 @@ class PauseMenu(FloatLayout):
         self.add_widget(layout)
     def update_bg(self, *a): self.bg.pos = self.pos; self.bg.size = self.size
 
+# ---------- Меню проигрыша ----------
 class GameOverMenu(FloatLayout):
     def __init__(self, restart_cb, menu_cb, **kwargs):
         super().__init__(**kwargs)
@@ -268,9 +252,6 @@ class GameWidget(Widget):
         self.upg_opts = []
         self.autosave_t = 0.0
 
-    def toast(self, text):
-        App.get_running_app().toast(text)
-
     def update(self, dt):
         for ex in self.explosions[:]:
             ex.life -= dt
@@ -289,6 +270,7 @@ class GameWidget(Widget):
             PLAYER.save()
             self.autosave_t = 0.0
 
+        # Если игра на паузе, открыто меню станции или уровня — только перерисовываем
         if self.game_over or self.upgrading or self.paused or self.station_menu_open or self.width <= 0:
             self.redraw(); return
 
@@ -412,7 +394,7 @@ class GameWidget(Widget):
             if (p.x - s.x)**2 + (p.y - s.y)**2 < (20 + 15)**2:
                 self.pickups.remove(p); s.add_mod(p.mtype)
 
-        # СТАНЦИИ (открывают меню)
+        # СТАНЦИИ
         for st in self.stations:
             if st.used: continue
             hit = False
@@ -423,8 +405,9 @@ class GameWidget(Widget):
             if hit:
                 st.used = True
                 self.station_menu_open = True
-                app = App.get_running_app()
-                app.root.add_widget(StationMenu(game_ref=self))
+                self.paused = True  # ВАЖНО: ставим игру на паузу перед меню
+                App.get_running_app().root.add_widget(StationMenu(game_ref=self))
+                self.redraw()
                 return
 
         self.wave_timer -= dt
