@@ -38,6 +38,32 @@ jobs:
           pip install --upgrade pip
           pip install buildozer==1.5.0 cython==3.0.11 virtualenv
 
+      - name: Configure git for network resilience
+        run: |
+          git config --global http.postBuffer 104857600
+          git config --global http.lowSpeedLimit 1000
+          git config --global http.lowSpeedTime 120
+
+      - name: Pre-clone python-for-android with retries
+        run: |
+          mkdir -p .buildozer/android/platform
+          for attempt in 1 2 3 4 5; do
+            echo "=== Clone attempt $attempt ==="
+            if git clone --depth 1 -b master https://github.com/kivy/python-for-android.git .buildozer/android/platform/python-for-android; then
+              echo "Clone succeeded on attempt $attempt"
+              break
+            fi
+            echo "Clone attempt $attempt failed, cleaning up..."
+            rm -rf .buildozer/android/platform/python-for-android
+            if [ $attempt -lt 5 ]; then
+              echo "Waiting $((attempt * 15)) seconds before retry..."
+              sleep $((attempt * 15))
+            else
+              echo "ERROR: All clone attempts failed!"
+              exit 1
+            fi
+          done
+
       - name: Build APK with Buildozer
         run: |
           export APP_ANDROID_ACCEPT_SDK_LICENSE=1
